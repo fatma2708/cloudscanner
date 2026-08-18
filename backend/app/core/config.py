@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     storage_root: str = "./storage"
 
     # --- LLM ---
-    llm_provider: str = "auto"
+    llm_provider: str = "huggingface"
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"

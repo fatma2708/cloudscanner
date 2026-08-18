@@ -13,7 +13,8 @@ Runs the full CloudPilot pipeline on a set of Terraform files:
 9. Build the interactive architecture graph (``architecture``)
 10. Generate the narrative architecture review (``llm``)
 
-Everything is deterministic except the LLM narrative, which degrades gracefully.
+Everything is deterministic except the LLM narrative, which is powered by the
+configured LLM provider (HuggingFace by default).
 
 **Canonical Cost Model**:
     There is exactly ONE source of truth for every cost number.
@@ -308,7 +309,7 @@ def _build_metadata(settings, config, scores, recommendations) -> dict:
     from app.services.llm.router import get_provider
 
     provider = get_provider(settings)
-    provider_name = provider.name if provider else "deterministic-fallback"
+    provider_name = provider.name
 
     # Resolve display model name from settings
     model_name = ""
@@ -326,7 +327,7 @@ def _build_metadata(settings, config, scores, recommendations) -> dict:
         "openai": "OpenAI",
         "anthropic": "Anthropic",
         "gemini": "Google Gemini",
-    }.get(provider_name, "Deterministic")
+    }.get(provider_name, provider_name)
 
     return {
         "llm_provider": provider_name,

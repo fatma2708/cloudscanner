@@ -87,7 +87,7 @@ export default function AnalysisPage() {
           <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">
             AI Review: {meta.llm_model || meta.llm_provider}
           </span>
-          {meta.llm_provider_label && meta.llm_provider !== "deterministic-fallback" && (
+          {meta.llm_provider_label && (
             <span className="px-2 py-0.5 rounded-full bg-violet-50 text-violet-600 font-medium">
               Provider: {meta.llm_provider_label}
             </span>

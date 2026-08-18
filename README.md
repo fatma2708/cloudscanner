@@ -106,7 +106,7 @@ CloudPilot includes a custom HCL2 parser (hand-rolled, no external Terraform bin
 
 ### AI-powered review
 
-When an LLM API key is configured (OpenAI, Anthropic, Gemini, or HuggingFace), CloudPilot sends the parsed architecture to the model for a narrative review. Without a key, it falls back to a built-in heuristic engine with 21 rules that still produces detailed, explainable findings. The system uses a hybrid approach — the LLM generates natural-language explanations while the rule engine provides structured, deterministic recommendations.
+CloudPilot sends the parsed architecture to the configured LLM (HuggingFace by default) for a narrative review. The LLM generates natural-language explanations while the deterministic rules engine provides structured, actionable recommendations. Both are used together — the rule engine flags issues, and the LLM provides the architect-level narrative.
 
 ### Multi-cloud cost comparison
 
@@ -300,16 +300,18 @@ All settings are configured via environment variables. Copy `.env.example` to `.
 | `CORS_ORIGINS` | `http://localhost:3000` | Allowed frontend URLs |
 | `STORAGE_ROOT` | `./storage` | Uploaded Terraform file storage |
 
-### LLM settings (optional)
+### LLM settings
+
+CloudPilot uses an LLM for narrative architecture reviews. HuggingFace is the default provider.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `auto` | `auto`, `openai`, `anthropic`, `gemini`, `huggingface`, or `none` |
-| `OPENAI_API_KEY` | — | OpenAI API key |
-| `ANTHROPIC_API_KEY` | — | Anthropic API key |
-| `GEMINI_API_KEY` | — | Google Gemini API key |
-
-CloudPilot works without any LLM configuration using its built-in heuristic engine.
+| `LLM_PROVIDER` | `huggingface` | `huggingface`, `openai`, `anthropic`, or `gemini` |
+| `HF_API_KEY` | — | HuggingFace API key (default provider) |
+| `HF_MODEL` | `Qwen/Qwen3-Coder-30B-A3B-Instruct` | HuggingFace model to use |
+| `OPENAI_API_KEY` | — | OpenAI API key (if using OpenAI) |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key (if using Anthropic) |
+| `GEMINI_API_KEY` | — | Google Gemini API key (if using Gemini) |
 
 ---
 
@@ -361,7 +363,7 @@ make lint
 
 **Database errors on startup** — If using PostgreSQL, make sure it's running and run `alembic upgrade head`.
 
-**LLM review not working** — Set `LLM_PROVIDER` and the corresponding API key. For local models, use Ollama (see Configuration section).
+**LLM review not working** — Ensure `HF_API_KEY` is set in your `.env` file. The HuggingFace provider is used by default.
 
 ---
 

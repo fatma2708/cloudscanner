@@ -1,4 +1,4 @@
-"""LLM router: pick the configured provider, or return None for the heuristic fallback."""
+"""LLM router: pick the configured provider and raise if none is available."""
 
 from __future__ import annotations
 
@@ -6,12 +6,15 @@ from app.core.config import Settings
 from app.services.llm.base import LLMProvider
 
 
-def get_provider(settings: Settings | None = None) -> LLMProvider | None:
-    """Return the first configured LLM provider according to ``LLM_PROVIDER``.
+class LLMConfigError(Exception):
+    """Raised when no LLM provider is configured."""
+
+
+def get_provider(settings: Settings | None = None) -> LLMProvider:
+    """Return the configured LLM provider.
 
     ``auto`` (default) prefers HuggingFace, then OpenAI, then Anthropic, then
-    Gemini.  Returns ``None`` when no API keys are configured — callers then
-    use the deterministic narrative engine.
+    Gemini.  Raises :class:`LLMConfigError` when no API key is configured.
     """
     from app.services.llm.providers import (
         AnthropicProvider,
@@ -37,9 +40,17 @@ def get_provider(settings: Settings | None = None) -> LLMProvider | None:
         for _, cls, available in candidates:
             if available:
                 return cls(settings)
-        return None
+        raise LLMConfigError(
+            "No LLM provider configured. Set at least one API key "
+            "(HF_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY)."
+        )
 
     for name, cls, available in candidates:
         if name == requested:
-            return cls(settings) if available else None
-    return None
+            if not available:
+                raise LLMConfigError(
+                    f"LLM provider '{name}' is configured but its API key is missing."
+                )
+            return cls(settings)
+
+    raise LLMConfigError(f"Unknown LLM provider: '{requested}'.")

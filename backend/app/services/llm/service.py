@@ -1,9 +1,8 @@
-"""Hybrid narrative engine.
+"""LLM narrative engine.
 
-If an LLM provider is configured, CloudPilot calls it with a compact summary of
-the analysis to produce an architecture review in natural language. Otherwise it
-falls back to a deterministic template generator so the product remains fully
-functional without API keys.
+CloudPilot calls the configured LLM provider (HuggingFace by default) with a
+compact summary of the analysis to produce an architecture review in natural
+language.
 
 Guardrails:
   - The LLM must NEVER override, remove, or contradict deterministic rule-engine
@@ -95,64 +94,6 @@ _COST_HALLUCINATION_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
-def _fallback_review(payload: dict) -> dict:
-    """Deterministic narrative built entirely from analysis data."""
-    score = payload.get("scores", {}).get("overall", 0)
-    grade = payload.get("scores", {}).get("grade", "F")
-    finops = payload.get("finops", {})
-    recs = payload.get("recommendations", [])
-    resources = payload.get("resources", [])
-    savings = finops.get("monthly_savings", 0)
-    by_service = finops.get("by_service", [])
-
-    top_services = (
-        ", ".join(f"{s['service_label']} (${s['monthly']:,.0f}/mo)" for s in by_service[:3])
-        or "n/a"
-    )
-
-    severity_lines = []
-    for sev in ("critical", "high", "medium", "low"):
-        count = len([r for r in recs if r.get("severity") == sev])
-        if count:
-            severity_lines.append(f"- **{count}** {sev} findings")
-
-    review = [
-        "## Executive Summary",
-        (
-            f"This codebase received a production readiness score of **{score:.0f}/100 "
-            f"({grade})**. The configuration provisions **{len(resources)}** resources "
-            f"across **{len(by_service)}** service categories, with the largest spend on "
-            f"{top_services}."
-        ),
-    ]
-    if savings > 0:
-        review.append(
-            f"Applying the recommendations below saves an estimated **${savings:,.0f}/mo "
-            f"(${savings * 12:,.0f}/yr)** — "
-            f"{finops.get('savings_pct', 0):.0f}% of current spend."
-        )
-    else:
-        review.append(
-            "No material cost savings were detected; focus is on reliability and posture."
-        )
-    review.append("\n## Key Findings\n")
-    if severity_lines:
-        review.extend(severity_lines)
-    else:
-        review.append("- No issues raised by the rules engine.")
-    review.append("\n## Recommended Actions\n")
-    for rec in recs[:5]:
-        review.append(
-            f"- **{rec.get('title')}** — {rec.get('description', '')[:180]}{'...' if len(rec.get('description', '')) > 180 else ''}"
-        )
-    return {
-        "provider": "cloudpilot-rules-engine",
-        "executive_summary": review[1],
-        "architecture_review": "\n".join(review),
-        "top_severities": severity_lines,
-    }
-
-
 def _guard_postprocess(text: str, recommendations: list[dict]) -> tuple[str, bool]:
     """Check LLM output for contradictions against deterministic findings
     and for hallucinated runtime data.
@@ -204,7 +145,7 @@ def _guard_postprocess(text: str, recommendations: list[dict]) -> tuple[str, boo
 
 
 def generate_review(payload: dict) -> dict:
-    """Generate an architecture review for an analysis payload.
+    """Generate an architecture review using the configured LLM.
 
     ``payload`` must contain ``scores``, ``finops``, ``recommendations`` and
     ``resources`` keys. Returns a dict with an ``architecture_review`` Markdown
@@ -238,40 +179,34 @@ def generate_review(payload: dict) -> dict:
         ],
     }
 
-    if provider is None:
-        return _fallback_review(payload)
+    import asyncio
 
-    try:
-        import asyncio
+    user_prompt = (
+        "Here is the analysis summary in JSON:\n"
+        + json.dumps(compact, indent=2)
+        + "\n\nWrite a principal architect review: an executive summary, the top "
+        "risks, the highest-leverage cost actions, and a prioritized action list.\n\n"
+        "Remember: the recommendations list is deterministic and authoritative. "
+        "You MUST mention every critical and high severity finding. You MUST NOT "
+        "say the infrastructure is secure or well-optimized if critical/high "
+        "findings exist.\n\n"
+        "IMPORTANT: Do NOT invent AWS prices, runtime metrics (CPU/memory/network), "
+        "or performance data. Only discuss what can be determined from the "
+        "Terraform configuration. Use language like 'the configuration does not "
+        "declare X' rather than 'X is missing at runtime'."
+    )
+    text = asyncio.run(provider.complete(_SYSTEM_PROMPT, user_prompt))
 
-        user_prompt = (
-            "Here is the analysis summary in JSON:\n"
-            + json.dumps(compact, indent=2)
-            + "\n\nWrite a principal architect review: an executive summary, the top "
-            "risks, the highest-leverage cost actions, and a prioritized action list.\n\n"
-            "Remember: the recommendations list is deterministic and authoritative. "
-            "You MUST mention every critical and high severity finding. You MUST NOT "
-            "say the infrastructure is secure or well-optimized if critical/high "
-            "findings exist.\n\n"
-            "IMPORTANT: Do NOT invent AWS prices, runtime metrics (CPU/memory/network), "
-            "or performance data. Only discuss what can be determined from the "
-            "Terraform configuration. Use language like 'the configuration does not "
-            "declare X' rather than 'X is missing at runtime'."
-        )
-        text = asyncio.run(provider.complete(_SYSTEM_PROMPT, user_prompt))
+    # Guardrail: post-process to catch contradictions and hallucinations
+    text, was_modified = _guard_postprocess(text, recommendations)
 
-        # Guardrail: post-process to catch contradictions and hallucinations
-        text, was_modified = _guard_postprocess(text, recommendations)
-
-        return {
-            "provider": provider.name,
-            "executive_summary": text.split("\n\n")[0],
-            "architecture_review": text,
-            "top_severities": [],
-            "guardrail_applied": was_modified,
-        }
-    except Exception:
-        return _fallback_review(payload)
+    return {
+        "provider": provider.name,
+        "executive_summary": text.split("\n\n")[0],
+        "architecture_review": text,
+        "top_severities": [],
+        "guardrail_applied": was_modified,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -298,18 +233,10 @@ def generate_hcl_assist(recommendation: dict, config: dict) -> dict:
       - code: str (the generated HCL, or empty if unavailable/invalid)
       - validated: bool (whether structural validation passed)
       - warnings: list[str]
-      - provider: str (llm provider name or "deterministic-fallback")
+      - provider: str (llm provider name)
     """
     settings: Settings = get_settings()
     provider = get_provider(settings)
-
-    if provider is None:
-        return {
-            "code": "",
-            "validated": False,
-            "warnings": ["No LLM provider configured for HCL generation"],
-            "provider": "deterministic-fallback",
-        }
 
     try:
         import asyncio
@@ -347,5 +274,5 @@ def generate_hcl_assist(recommendation: dict, config: dict) -> dict:
             "code": "",
             "validated": False,
             "warnings": [f"LLM HCL generation failed: {exc}"],
-            "provider": provider.name if provider else "deterministic-fallback",
+            "provider": provider.name,
         }
