@@ -141,7 +141,7 @@ _SERVICE_PREFIXES: dict[str, tuple[str, str, str]] = {
     "aws_cloudwatch_dashboard": ("observability", "cloudwatch", "CloudWatch Dashboard"),
     "aws_prometheus_workspace": ("observability", "prometheus", "AMP Workspace"),
     "aws_grafana_workspace": ("observability", "grafana", "Grafana Workspace"),
-    "aws_xray_samling_rule": ("observability", "xray", "X-Ray Sampling Rule"),
+    "aws_xray_sampling_rule": ("observability", "xray", "X-Ray Sampling Rule"),
     # Backup / DR
     "aws_backup_plan": ("reliability", "backup", "Backup Plan"),
     "aws_backup_vault": ("reliability", "backup", "Backup Vault"),

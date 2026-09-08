@@ -20,6 +20,12 @@ export function formatPercent(value: number | undefined | null, digits = 1): str
   return `${(Number(value ?? 0)).toFixed(digits)}%`;
 }
 
+export function formatConfidence(value: number | undefined | null): string {
+  const n = Number(value ?? 0);
+  const pct = Math.round(n * 1000) / 10;
+  return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
+}
+
 export function formatNumber(value: number | undefined | null, digits = 0): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(Number(value ?? 0));
 }

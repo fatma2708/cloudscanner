@@ -12,9 +12,9 @@ from app.api.v1 import (
     demo,
     finops,
     health,
-    optimization,
     projects,
     reports,
+    risk,
     scenario,
     score,
     sustainability,
@@ -26,7 +26,6 @@ router.include_router(health.router, tags=["health"])
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(projects.router, prefix="/projects", tags=["projects"])
 router.include_router(analyses.router, prefix="/analyses", tags=["analyses"])
-router.include_router(optimization.router, prefix="/optimization", tags=["optimization"])
 router.include_router(comparison.router, prefix="/comparison", tags=["comparison"])
 router.include_router(score.router, prefix="/score", tags=["score"])
 router.include_router(architecture.router, prefix="/architecture", tags=["architecture"])
@@ -35,3 +34,4 @@ router.include_router(sustainability.router, prefix="/sustainability", tags=["su
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(scenario.router, prefix="/scenario", tags=["scenario"])
 router.include_router(demo.router, prefix="/demo", tags=["demo"])
+router.include_router(risk.router, prefix="/risk", tags=["risk"])

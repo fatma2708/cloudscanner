@@ -22,7 +22,6 @@ from dataclasses import dataclass, field
 from app.services.pricing.providers import ProviderCatalog, cheapest_vm, get_provider
 from app.services.terraform.parser import TerraformConfig
 
-
 # ---------------------------------------------------------------------------
 # Service equivalence mapping
 # ---------------------------------------------------------------------------
@@ -30,33 +29,109 @@ from app.services.terraform.parser import TerraformConfig
 # AWS managed services that may NOT have direct equivalents on all providers.
 # Each entry: (aws_kind, human_label, set of provider keys that have validated equivalents)
 _EQUIVALENCE_MAP: dict[str, tuple[str, set[str]]] = {
-    "ecs":              ("ECS (managed containers)",  {"aws", "azure", "google"}),
-    "eks":              ("EKS (managed Kubernetes)",   {"aws", "azure", "google"}),
-    "rds":              ("RDS (managed database)",      {"aws", "azure", "google", "oracle"}),
-    "elasticache":      ("ElastiCache (managed cache)", {"aws", "azure", "google"}),
-    "dynamodb":         ("DynamoDB (NoSQL)",            {"aws", "azure", "google"}),
-    "s3":               ("S3 (object storage)",         {"aws", "azure", "google", "digitalocean", "hetzner", "scaleway", "ovh", "oracle", "vultr", "linode"}),
-    "alb":              ("ALB (managed load balancer)", {"aws", "azure", "google", "digitalocean", "hetzner", "scaleway", "ovh", "oracle", "vultr", "linode"}),
-    "elb":              ("ELB (classic load balancer)", {"aws", "azure", "google"}),
-    "nat":              ("NAT Gateway (managed)",       {"aws", "azure", "google", "digitalocean", "scaleway", "oracle"}),
-    "eip":              ("Elastic IP",                  {"aws", "azure", "google", "digitalocean", "hetzner", "scaleway", "ovh", "oracle", "vultr", "linode"}),
-    "lambda":           ("Lambda (serverless)",         {"aws", "azure", "google", "digitalocean"}),
-    "ec2":              ("EC2 (VMs)",                   {"aws", "azure", "google", "digitalocean", "hetzner", "scaleway", "ovh", "oracle", "vultr", "linode"}),
-    "asg":              ("Auto Scaling Group",          {"aws", "azure", "google"}),
-    "ebs":              ("EBS (block storage)",         {"aws", "azure", "google", "digitalocean", "hetzner", "scaleway", "ovh", "oracle", "vultr", "linode"}),
-    "efs":              ("EFS (NFS)",                   {"aws", "azure", "google"}),
-    "ecr":              ("ECR (container registry)",    {"aws", "azure", "google", "digitalocean", "hetzner", "scaleway", "ovh"}),
-    "cloudwatch":       ("CloudWatch (monitoring)",     {"aws", "azure", "google"}),
-    "codepipeline":     ("CodePipeline (CI/CD)",        {"aws"}),
-    "codebuild":        ("CodeBuild (build)",           {"aws"}),
-    "codedeploy":       ("CodeDeploy (deployment)",     {"aws"}),
-    "sns":              ("SNS (notifications)",         {"aws", "azure", "google"}),
-    "sqs":              ("SQS (queues)",                {"aws", "azure", "google"}),
-    "apigateway":       ("API Gateway",                 {"aws", "azure", "google"}),
-    "route53":          ("Route53 (DNS)",               {"aws"}),
-    "cloudfront":       ("CloudFront (CDN)",            {"aws", "azure", "google"}),
-    "waf":              ("WAF (firewall)",              {"aws", "azure", "google"}),
-    "kms":              ("KMS (encryption)",            {"aws", "azure", "google"}),
+    "ecs": ("ECS (managed containers)", {"aws", "azure", "google"}),
+    "eks": ("EKS (managed Kubernetes)", {"aws", "azure", "google"}),
+    "rds": ("RDS (managed database)", {"aws", "azure", "google", "oracle"}),
+    "elasticache": ("ElastiCache (managed cache)", {"aws", "azure", "google"}),
+    "dynamodb": ("DynamoDB (NoSQL)", {"aws", "azure", "google"}),
+    "s3": (
+        "S3 (object storage)",
+        {
+            "aws",
+            "azure",
+            "google",
+            "digitalocean",
+            "hetzner",
+            "scaleway",
+            "ovh",
+            "oracle",
+            "vultr",
+            "linode",
+        },
+    ),
+    "alb": (
+        "ALB (managed load balancer)",
+        {
+            "aws",
+            "azure",
+            "google",
+            "digitalocean",
+            "hetzner",
+            "scaleway",
+            "ovh",
+            "oracle",
+            "vultr",
+            "linode",
+        },
+    ),
+    "elb": ("ELB (classic load balancer)", {"aws", "azure", "google"}),
+    "nat": (
+        "NAT Gateway (managed)",
+        {"aws", "azure", "google", "digitalocean", "scaleway", "oracle"},
+    ),
+    "eip": (
+        "Elastic IP",
+        {
+            "aws",
+            "azure",
+            "google",
+            "digitalocean",
+            "hetzner",
+            "scaleway",
+            "ovh",
+            "oracle",
+            "vultr",
+            "linode",
+        },
+    ),
+    "lambda": ("Lambda (serverless)", {"aws", "azure", "google", "digitalocean"}),
+    "ec2": (
+        "EC2 (VMs)",
+        {
+            "aws",
+            "azure",
+            "google",
+            "digitalocean",
+            "hetzner",
+            "scaleway",
+            "ovh",
+            "oracle",
+            "vultr",
+            "linode",
+        },
+    ),
+    "asg": ("Auto Scaling Group", {"aws", "azure", "google"}),
+    "ebs": (
+        "EBS (block storage)",
+        {
+            "aws",
+            "azure",
+            "google",
+            "digitalocean",
+            "hetzner",
+            "scaleway",
+            "ovh",
+            "oracle",
+            "vultr",
+            "linode",
+        },
+    ),
+    "efs": ("EFS (NFS)", {"aws", "azure", "google"}),
+    "ecr": (
+        "ECR (container registry)",
+        {"aws", "azure", "google", "digitalocean", "hetzner", "scaleway", "ovh"},
+    ),
+    "cloudwatch": ("CloudWatch (monitoring)", {"aws", "azure", "google"}),
+    "codepipeline": ("CodePipeline (CI/CD)", {"aws"}),
+    "codebuild": ("CodeBuild (build)", {"aws"}),
+    "codedeploy": ("CodeDeploy (deployment)", {"aws"}),
+    "sns": ("SNS (notifications)", {"aws", "azure", "google"}),
+    "sqs": ("SQS (queues)", {"aws", "azure", "google"}),
+    "apigateway": ("API Gateway", {"aws", "azure", "google"}),
+    "route53": ("Route53 (DNS)", {"aws"}),
+    "cloudfront": ("CloudFront (CDN)", {"aws", "azure", "google"}),
+    "waf": ("WAF (firewall)", {"aws", "azure", "google"}),
+    "kms": ("KMS (encryption)", {"aws", "azure", "google"}),
 }
 
 # Services that are "infrastructure primitives" available everywhere
@@ -89,7 +164,8 @@ def build_workload(config: TerraformConfig) -> Workload:
         attrs = res.attributes
 
         if res.kind == "ec2" and res.service == "compute":
-            from app.services.pricing.catalog import get_ec2, DEFAULT_EGRESS_GB
+            from app.services.pricing.catalog import DEFAULT_EGRESS_GB, get_ec2
+
             spec = get_ec2(str(attrs.get("instance_type", "")))
             n = 1
             if spec:
@@ -100,6 +176,7 @@ def build_workload(config: TerraformConfig) -> Workload:
 
         elif res.kind == "asg":
             from app.services.pricing.catalog import DEFAULT_EGRESS_GB
+
             min_size = attrs.get("min_size", 1)
             try:
                 min_size = int(min_size) if isinstance(min_size, (int, float)) else 1
@@ -123,6 +200,7 @@ def build_workload(config: TerraformConfig) -> Workload:
 
         elif res.kind == "ebs":
             from app.services.pricing.catalog import DEFAULT_EBS_GB
+
             size = attrs.get("size", DEFAULT_EBS_GB)
             try:
                 wl.block_gb += float(size)
@@ -131,6 +209,7 @@ def build_workload(config: TerraformConfig) -> Workload:
 
         elif res.kind == "efs":
             from app.services.pricing.catalog import DEFAULT_EFS_GB
+
             size = attrs.get("size_gb", DEFAULT_EFS_GB)
             try:
                 wl.efs_gb += float(size)
@@ -139,6 +218,7 @@ def build_workload(config: TerraformConfig) -> Workload:
 
         elif res.kind == "s3":
             from app.services.pricing.catalog import DEFAULT_S3_GB
+
             size = attrs.get("size_gb", DEFAULT_S3_GB)
             try:
                 wl.object_gb += float(size)
@@ -147,6 +227,7 @@ def build_workload(config: TerraformConfig) -> Workload:
 
         elif res.kind == "rds":
             from app.services.pricing.catalog import get_rds
+
             cls = str(attrs.get("instance_class") or attrs.get("instance_type") or "")
             spec = get_rds(cls)
             if spec:
@@ -192,7 +273,14 @@ def _assess_equivalence(config: TerraformConfig, provider_key: str) -> dict:
             kinds_present[res.kind] = _EQUIVALENCE_MAP[res.kind][0]
 
     if not kinds_present:
-        return {"supported": [], "unsupported": [], "status": "comparable", "coverage_pct": 100.0, "mapping_coverage_pct": 100.0, "architecture_equivalence": "high"}
+        return {
+            "supported": [],
+            "unsupported": [],
+            "status": "comparable",
+            "coverage_pct": 100.0,
+            "mapping_coverage_pct": 100.0,
+            "architecture_equivalence": "high",
+        }
 
     supported = []
     unsupported = []
@@ -287,27 +375,29 @@ def compare_providers(
         equiv = _assess_equivalence(config, catalog.key)
 
         if equiv["status"] == "not_comparable":
-            results.append({
-                "provider": catalog.key,
-                "label": catalog.label,
-                "region": catalog.region,
-                "status": "not_comparable",
-                "comparison_confidence": "none",
-                "estimated_monthly_cost": None,
-                "yearly": None,
-                "breakdown": None,
-                "unsupported_services": [s["label"] for s in equiv["unsupported"]],
-                "supported_services": [s["label"] for s in equiv["supported"]],
-                "coverage_pct": equiv["coverage_pct"],
-                "mapping_coverage_pct": equiv["mapping_coverage_pct"],
-                "architecture_equivalence": equiv["architecture_equivalence"],
-                "availability": catalog.availability,
-                "notes": list(catalog.notes),
-                "sustainability_note": "Regional carbon-intensity reference available",
-                "delta_vs_baseline": None,
-                "delta_pct": None,
-                "cost_type": None,
-            })
+            results.append(
+                {
+                    "provider": catalog.key,
+                    "label": catalog.label,
+                    "region": catalog.region,
+                    "status": "not_comparable",
+                    "comparison_confidence": "none",
+                    "estimated_monthly_cost": None,
+                    "yearly": None,
+                    "breakdown": None,
+                    "unsupported_services": [s["label"] for s in equiv["unsupported"]],
+                    "supported_services": [s["label"] for s in equiv["supported"]],
+                    "coverage_pct": equiv["coverage_pct"],
+                    "mapping_coverage_pct": equiv["mapping_coverage_pct"],
+                    "architecture_equivalence": equiv["architecture_equivalence"],
+                    "availability": catalog.availability,
+                    "notes": list(catalog.notes),
+                    "sustainability_note": "Regional carbon-intensity reference available",
+                    "delta_vs_baseline": None,
+                    "delta_pct": None,
+                    "cost_type": None,
+                }
+            )
             continue
 
         estimate = estimate_provider(catalog, wl)
@@ -318,30 +408,36 @@ def compare_providers(
         elif len(wl.dbs) > 0 or wl.lambdas > 0:
             confidence = "medium"
 
-        results.append({
-            "provider": catalog.key,
-            "label": catalog.label,
-            "region": catalog.region,
-            "status": equiv["status"],
-            "comparison_confidence": confidence,
-            "estimated_monthly_cost": estimate["monthly"],
-            "yearly": round(estimate["monthly"] * 12, 2),
-            "breakdown": estimate["breakdown"],
-            "unsupported_services": [s["label"] for s in equiv["unsupported"]],
-            "supported_services": [s["label"] for s in equiv["supported"]],
-            "coverage_pct": equiv["coverage_pct"],
-            "mapping_coverage_pct": equiv["mapping_coverage_pct"],
-            "architecture_equivalence": equiv["architecture_equivalence"],
-            "availability": catalog.availability,
-            "notes": list(catalog.notes),
-            "sustainability_note": "Regional carbon-intensity reference available",
-            "delta_vs_baseline": None,
-            "delta_pct": None,
-            "cost_type": "estimated",
-        })
+        results.append(
+            {
+                "provider": catalog.key,
+                "label": catalog.label,
+                "region": catalog.region,
+                "status": equiv["status"],
+                "comparison_confidence": confidence,
+                "estimated_monthly_cost": estimate["monthly"],
+                "yearly": round(estimate["monthly"] * 12, 2),
+                "breakdown": estimate["breakdown"],
+                "unsupported_services": [s["label"] for s in equiv["unsupported"]],
+                "supported_services": [s["label"] for s in equiv["supported"]],
+                "coverage_pct": equiv["coverage_pct"],
+                "mapping_coverage_pct": equiv["mapping_coverage_pct"],
+                "architecture_equivalence": equiv["architecture_equivalence"],
+                "availability": catalog.availability,
+                "notes": list(catalog.notes),
+                "sustainability_note": "Regional carbon-intensity reference available",
+                "delta_vs_baseline": None,
+                "delta_pct": None,
+                "cost_type": "estimated",
+            }
+        )
 
     baseline = next((r for r in results if r["provider"] == baseline_provider), None)
-    baseline_monthly = baseline_cost if baseline_cost is not None else (baseline["estimated_monthly_cost"] if baseline else 0.0)
+    baseline_monthly = (
+        baseline_cost
+        if baseline_cost is not None
+        else (baseline["estimated_monthly_cost"] if baseline else 0.0)
+    )
 
     if baseline_cost is not None and baseline:
         baseline["estimated_monthly_cost"] = round(baseline_cost, 2)
@@ -357,10 +453,16 @@ def compare_providers(
             orig = estimate_provider(get_provider(baseline_provider), wl)
             if orig["monthly"] > 0:
                 factor = baseline_cost / orig["monthly"]
-                baseline["breakdown"] = {k: round(v * factor, 2) for k, v in baseline["breakdown"].items()}
+                baseline["breakdown"] = {
+                    k: round(v * factor, 2) for k, v in baseline["breakdown"].items()
+                }
 
     for r in results:
-        if r["provider"] != baseline_provider and r["estimated_monthly_cost"] is not None and baseline_monthly is not None:
+        if (
+            r["provider"] != baseline_provider
+            and r["estimated_monthly_cost"] is not None
+            and baseline_monthly is not None
+        ):
             delta = r["estimated_monthly_cost"] - baseline_monthly
             r["delta_vs_baseline"] = round(delta, 2)
             r["delta_pct"] = round(delta / max(baseline_monthly, 1) * 100, 1)
@@ -379,8 +481,16 @@ def _ordered_providers(baseline: str) -> list[ProviderCatalog]:
         *[
             k
             for k in (
-                "aws", "azure", "google", "digitalocean", "hetzner",
-                "scaleway", "ovh", "oracle", "vultr", "linode",
+                "aws",
+                "azure",
+                "google",
+                "digitalocean",
+                "hetzner",
+                "scaleway",
+                "ovh",
+                "oracle",
+                "vultr",
+                "linode",
             )
             if k != baseline
         ],

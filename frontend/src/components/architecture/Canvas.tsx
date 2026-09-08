@@ -1,4 +1,5 @@
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Graph } from "@/lib/types";
 import { computeLayout } from "./layout";
 import { ArchitectureNode } from "./Node";
@@ -15,6 +16,8 @@ interface Props {
     total_block_count?: number;
     resource_count: number;
     data_source_count?: number;
+    module_count?: number;
+    unexpanded_module_count?: number;
   };
 }
 
@@ -24,7 +27,26 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const dragState = useRef<{
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+    moved: boolean;
+  } | null>(null);
+  const pointerCache = useRef(new Map<number, { x: number; y: number }>());
+  const pinchState = useRef<{
+    dist: number;
+    zoom: number;
+    pan: { x: number; y: number };
+  } | null>(null);
+
+  const MIN_ZOOM = 0.25;
+  const MAX_ZOOM = 4;
+
+  const clampZoom = useCallback((z: number) => Math.min(Math.max(z, MIN_ZOOM), MAX_ZOOM), []);
 
   const visibleGraph = useMemo(() => {
     if (showSupporting) return graph;
@@ -89,7 +111,112 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
   const handleFit = useCallback(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
+    setIsPanning(false);
   }, []);
+
+  const cursorToViewBox = useCallback(
+    (clientX: number, clientY: number) => {
+      const svg = svgRef.current;
+      if (!svg) return { x: 0, y: 0 };
+      const rect = svg.getBoundingClientRect();
+      const [minX, minY, vbW, vbH] = viewBox.split(" ").map(Number);
+      return {
+        x: minX + ((clientX - rect.left) / rect.width) * vbW,
+        y: minY + ((clientY - rect.top) / rect.height) * vbH,
+      };
+    },
+    [viewBox]
+  );
+
+  const wheelHandler = useCallback(
+    (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const nextZoom = clampZoom(zoom * factor);
+      if (nextZoom === zoom) return;
+      const { x: cx, y: cy } = cursorToViewBox(e.clientX, e.clientY);
+      const f = nextZoom / zoom;
+      setZoom(nextZoom);
+      setPan((p) => ({ x: cx - (cx - p.x) * f, y: cy - (cy - p.y) * f }));
+    },
+    [zoom, clampZoom, cursorToViewBox]
+  );
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    svg.addEventListener("wheel", wheelHandler, { passive: false });
+    return () => svg.removeEventListener("wheel", wheelHandler);
+  }, [wheelHandler]);
+
+  const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const target = e.target as Element;
+    if (target.closest("[data-node-id]")) return;
+    svgRef.current?.setPointerCapture?.(e.pointerId);
+    pointerCache.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointerCache.current.size === 2) {
+      dragState.current = null;
+      const [p1, p2] = [...pointerCache.current.values()];
+      pinchState.current = {
+        dist: Math.hypot(p2.x - p1.x, p2.y - p1.y),
+        zoom,
+        pan,
+      };
+      return;
+    }
+    dragState.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+      moved: false,
+    };
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const prev = pointerCache.current.get(e.pointerId);
+    if (prev) pointerCache.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointerCache.current.size >= 2 && pinchState.current) {
+      const pts = [...pointerCache.current.values()];
+      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      const mx = (pts[0].x + pts[1].x) / 2;
+      const my = (pts[0].y + pts[1].y) / 2;
+      const { x: cx, y: cy } = cursorToViewBox(mx, my);
+      const { dist: startDist, zoom: startZoom, pan: startPan } = pinchState.current;
+      if (startDist > 0) {
+        const nextZoom = clampZoom(startZoom * (dist / startDist));
+        const f = nextZoom / startZoom;
+        setZoom(nextZoom);
+        setPan({ x: cx - (cx - startPan.x) * f, y: cy - (cy - startPan.y) * f });
+      }
+      return;
+    }
+
+    const drag = dragState.current;
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) < 3) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      setIsPanning(true);
+    }
+    setPan({ x: drag.panX + dx, y: drag.panY + dy });
+  };
+
+  const endPointer = (e: ReactPointerEvent<SVGSVGElement>) => {
+    pointerCache.current.delete(e.pointerId);
+    if (pointerCache.current.size < 2) pinchState.current = null;
+    dragState.current = null;
+    setIsPanning(false);
+  };
+
+  const handleBackgroundDoubleClick = (e: ReactMouseEvent<SVGSVGElement>) => {
+    const target = e.target as Element;
+    if (target.closest("[data-node-id]")) return;
+    handleFit();
+  };
 
   const dimmed = hoveredNode !== null;
   const focusedData = selectedNode
@@ -112,7 +239,8 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
           <p className="text-xs text-gray-500">
             {summary.total_block_count ?? summary.resource_count} Terraform blocks
             ({summary.resource_count} resources
-            {summary.data_source_count ? ` \u00b7 ${summary.data_source_count} data sources` : ""})
+            {summary.data_source_count ? ` \u00b7 ${summary.data_source_count} data sources` : ""}
+            {summary.module_count ? ` \u00b7 ${summary.module_count} modules` : ""})
             {" \u00b7 "}
             {groupCount} groups
           </p>
@@ -120,6 +248,9 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
             {showSupporting
               ? `Showing all ${topologyCount} nodes including ${implementationCount} implementation resources.`
               : `${visibleCount} of ${topologyCount} nodes visible (${implementationCount} implementation resources hidden)`}
+          </p>
+          <p className="text-[10px] text-gray-500 mt-0.5 font-medium">
+            Drag to pan &middot; Scroll or pinch to zoom &middot; Double-click background to fit &middot; Hover or click a node for details
           </p>
         </div>
       </div>
@@ -129,12 +260,13 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
         <Toolbar
           visibleCount={visibleGraph.nodes.length}
           edgeCount={visibleGraph.edges.length}
+          zoom={zoom}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           showSupporting={showSupporting}
           onToggleSupporting={onToggleSupporting}
-          onZoomIn={() => setZoom((z) => Math.min(z * 1.25, 4))}
-          onZoomOut={() => setZoom((z) => Math.max(z / 1.25, 0.25))}
+          onZoomIn={() => setZoom((z) => clampZoom(z * 1.25))}
+          onZoomOut={() => setZoom((z) => clampZoom(z / 1.25))}
           onFit={handleFit}
         />
       </div>
@@ -144,16 +276,22 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
         <svg
           ref={svgRef}
           viewBox={viewBox}
-          className="w-full rounded-xl"
-          style={{ height: "640px" }}
+          className={`w-full rounded-xl ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
+          style={{ height: "640px", touchAction: "none" }}
           preserveAspectRatio="xMidYMid meet"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endPointer}
+          onPointerCancel={endPointer}
+          onLostPointerCapture={endPointer}
+          onDoubleClick={handleBackgroundDoubleClick}
         >
           <defs>
             <marker id="arrow" markerWidth="6" markerHeight="5" refX="12" refY="2.5" orient="auto">
-              <path d="M0,0 L6,2.5 L0,5 L1.5,2.5 z" fill="rgba(100,116,139,0.3)" />
+              <path d="M0,0 L6,2.5 L0,5 L1.5,2.5 z" fill="rgba(71,85,105,0.55)" />
             </marker>
             <marker id="arrow-active" markerWidth="6" markerHeight="5" refX="12" refY="2.5" orient="auto">
-              <path d="M0,0 L6,2.5 L0,5 L1.5,2.5 z" fill="rgba(100,116,139,0.8)" />
+              <path d="M0,0 L6,2.5 L0,5 L1.5,2.5 z" fill="rgba(15,23,42,0.9)" />
             </marker>
           </defs>
 
@@ -217,13 +355,12 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
               const isSearchHit = matchingIds.has(n.id);
 
               return (
-                <g key={n.id} filter={isSearchHit ? "url(#search-glow)" : undefined}>
+                <g key={n.id} data-node-id={n.id} filter={isSearchHit ? "url(#search-glow)" : undefined}>
                   <ArchitectureNode
                     node={n}
                     x={p.x}
                     y={p.y}
                     isHovered={isHovered}
-                    isConnected={isConnected}
                     isDimmed={dimmed && !isConnected && !isSearchHit}
                     isSelected={selectedNode === n.id}
                     onMouseEnter={() => handleHover(n.id)}
@@ -265,6 +402,14 @@ export function ArchitectureCanvas({ graph, showSupporting, onToggleSupporting, 
             {item.label}
           </span>
         ))}
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-purple-200 bg-purple-50 px-2.5 py-1 text-[10px] text-purple-700">
+          <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z" />
+            <path d="M3 8l9 5 9-5M12 13v9" />
+          </svg>
+          Terraform module
+          <span className="text-purple-500">(dashed = not expanded)</span>
+        </span>
       </div>
     </div>
   );

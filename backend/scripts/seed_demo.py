@@ -47,7 +47,9 @@ def run() -> None:
             db.flush()
             print(f"Created project: {project.name}")
 
-        result = analyze(files=load_sample_files(), mode="balanced", provider="aws", default_region="us-east-1")
+        result = analyze(
+            files=load_sample_files(), mode="balanced", provider="aws", default_region="us-east-1"
+        )
         analysis = Analysis(
             project_id=project.id,
             mode="balanced",

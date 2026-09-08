@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -36,7 +37,7 @@ def get_current_user(
     try:
         payload = decode_access_token(_extract_token(authorization))
         user_id = int(payload.get("sub", ""))
-    except Exception:
+    except (jwt.InvalidTokenError, ValueError, TypeError):
         raise credentials_exc from None
     user = db.get(User, user_id)
     if user is None:

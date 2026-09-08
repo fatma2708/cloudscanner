@@ -8,12 +8,11 @@ frontend/.next/
 frontend/out/
 frontend/build/
 
-# production
-frontend/build/
-
 # misc
 .DS_Store
 *.pem
+*.err
+*.log
 
 # debug
 npm-debug.log*
@@ -34,9 +33,11 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv2/
 venv/
 env/
 .pytest_cache/
+backend/.pytest-*/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -44,6 +45,8 @@ htmlcov/
 backend/*.db
 backend/storage/
 backend/uploads/
+backend/data/
+backend/reports/
 
 # build artifacts
 frontend/tsconfig.tsbuildinfo

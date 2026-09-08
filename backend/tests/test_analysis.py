@@ -25,6 +25,12 @@ def test_recommendations_fire():
     assert "ec2-rightsize" in keys
 
 
+def test_demo_has_no_duplicate_resource_addresses():
+    config = _config()
+    addresses = [resource.address for resource in config.resources]
+    assert len(addresses) == len(set(addresses))
+
+
 def test_recommendation_explainability():
     config = _config()
     recs = run_recommendations(config)
@@ -208,7 +214,6 @@ def test_score_partial_assessment(client: TestClient):
     # Count assessed vs total dimensions
     assessed = sum(1 for c in scores["categories"] if c.get("evidence_status") == "available")
     total = len(scores["categories"])
-    unassessed = [c["label"] for c in scores["categories"] if c.get("evidence_status") != "available"]
 
     # If not all dimensions have evidence, overall must be weighted or N/A
     if assessed < total:
@@ -269,7 +274,11 @@ def test_hcl_s3_encryption_versioning(client: TestClient):
         if gc:
             # Transform {provider_type: {name, config}} to [{resource_type, name, config}]
             blocks = [
-                {"resource_type": ptype, "name": block.get("name", ""), "config": block.get("config", {})}
+                {
+                    "resource_type": ptype,
+                    "name": block.get("name", ""),
+                    "config": block.get("config", {}),
+                }
                 for ptype, block in gc.items()
                 if isinstance(block, dict)
             ]

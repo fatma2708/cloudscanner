@@ -50,47 +50,78 @@ _SYSTEM_PROMPT = (
     "Instead of the above, use language like:\n"
     "- 'The Terraform configuration does not declare X' (not 'X is missing at runtime')\n"
     "- 'This is a configuration-based optimization opportunity' (not 'the instance is oversized')\n"
-    "- 'No evidence of X in the configuration' (not 'X is not present')"
+    "- 'No evidence of X in the configuration' (not 'X is not present')\n\n"
+    "MODULE GUARDRAIL — Terraform modules:\n"
+    "The payload includes a modules list with an expansion state for each module. "
+    'Modules with "expanded": false were NOT inspected — their source was not '
+    "available. For those modules you may describe the declaration (address, "
+    "source, version, known inputs) but you MUST NOT infer, list, or assume their "
+    "internal resources or settings. Do not claim anything about the security, "
+    "cost, or sizing of unexpanded module contents. If most of the infrastructure "
+    "lives inside unexpanded modules, say so explicitly and note that the "
+    "assessment covers the root configuration only."
 )
 
 # Patterns that indicate the LLM contradicted deterministic findings
 _CONTRADICTION_PATTERNS: list[tuple[str, str]] = [
-    (r"no\s+(security|cost|reliability|compliance)\s+issues?\s+(were\s+)?(found|detected|identified)",
-     "Says no issues when rule engine found findings"),
-    (r"(infrastructure|codebase|environment)\s+is\s+(secure|well[- ]?optimized|clean|solid)",
-     "Declares infrastructure clean when findings exist"),
-    (r"no\s+(critical|high)\s+(issues?|findings?|risks?)",
-     "Denies critical/high findings when they exist"),
-    (r"(nothing|no\s+major)\s+(to\s+)?(fix|improve|address|worry)",
-     "Says nothing to fix when findings exist"),
-    (r"the\s+infrastructure\s+(looks?|appears?|seems?)\s+(good|great|clean|solid|well[- ]?configured)",
-     "Positive assessment contradicts findings"),
+    (
+        r"no\s+(security|cost|reliability|compliance)\s+issues?\s+(were\s+)?(found|detected|identified)",
+        "Says no issues when rule engine found findings",
+    ),
+    (
+        r"(infrastructure|codebase|environment)\s+is\s+(secure|well[- ]?optimized|clean|solid)",
+        "Declares infrastructure clean when findings exist",
+    ),
+    (
+        r"no\s+(critical|high)\s+(issues?|findings?|risks?)",
+        "Denies critical/high findings when they exist",
+    ),
+    (
+        r"(nothing|no\s+major)\s+(to\s+)?(fix|improve|address|worry)",
+        "Says nothing to fix when findings exist",
+    ),
+    (
+        r"the\s+infrastructure\s+(looks?|appears?|seems?)\s+(good|great|clean|solid|well[- ]?configured)",
+        "Positive assessment contradicts findings",
+    ),
 ]
 
 # Patterns that suggest the LLM hallucinated runtime data
 _HALLUCINATION_PATTERNS: list[tuple[str, str]] = [
-    (r"(cpu|memory|disk)\s+(utilization|usage)\s+(is|was|averages?)\s+\d+%",
-     "Claims runtime CPU/memory utilization"),
-    (r"(network|bandwidth)\s+(throughput|traffic)\s+(is|was|averages?)\s+\d+",
-     "Claims network throughput data"),
-    (r"(latency|response\s+time)\s+(is|was|averages?)\s+\d+\s*(ms|毫秒)",
-     "Claims latency/performance data"),
-    (r"(throughput|requests?\s+per\s+second|rps)\s+(is|was|averages?)\s+\d+",
-     "Claims request throughput data"),
-    (r"(current|actual|observed)\s+(cost|spend|bill)\s+(is|was)\s+\$[\d,.]+",
-     "Claims actual runtime cost (not from config)"),
-    (r"based\s+on\s+(my\s+)?(analysis\s+of\s+)?(runtime|live|actual)\s+(data|metrics|telemetry)",
-     "Claims to have analyzed runtime data"),
-    (r"\d+\.?\d*\s*kgCO2e",
-     "Provides precise carbon footprint numbers"),
+    (
+        r"(cpu|memory|disk)\s+(utilization|usage)\s+(is|was|averages?)\s+\d+%",
+        "Claims runtime CPU/memory utilization",
+    ),
+    (
+        r"(network|bandwidth)\s+(throughput|traffic)\s+(is|was|averages?)\s+\d+",
+        "Claims network throughput data",
+    ),
+    (
+        r"(latency|response\s+time)\s+(is|was|averages?)\s+\d+\s*(ms|毫秒)",
+        "Claims latency/performance data",
+    ),
+    (
+        r"(throughput|requests?\s+per\s+second|rps)\s+(is|was|averages?)\s+\d+",
+        "Claims request throughput data",
+    ),
+    (
+        r"(current|actual|observed)\s+(cost|spend|bill)\s+(is|was)\s+\$[\d,.]+",
+        "Claims actual runtime cost (not from config)",
+    ),
+    (
+        r"based\s+on\s+(my\s+)?(analysis\s+of\s+)?(runtime|live|actual)\s+(data|metrics|telemetry)",
+        "Claims to have analyzed runtime data",
+    ),
+    (r"\d+\.?\d*\s*kgCO2e", "Provides precise carbon footprint numbers"),
 ]
 
 # Forbidden cost claims (LLM should not invent prices)
 _COST_HALLUCINATION_PATTERNS: list[tuple[str, str]] = [
-    (r"\$\d+\.?\d*/(hour|hr|month|mo|gb|tb)",
-     "Invents per-unit pricing"),
-    (r"(instance|server|vm)\s+costs?\s+(about|around|approximately)?\s*\$[\d,.]+",
-     "Invents instance pricing"),
+    (r"\$\d+\.?\d*/(hour|hr|month|mo|gb|tb)", "Invents per-unit pricing"),
+    (
+        r"(instance|server|vm)\s+costs?\s+(about|around|approximately)?\s*\$[\d,.]+",
+        "Invents instance pricing",
+    ),
 ]
 
 
@@ -122,10 +153,7 @@ def _guard_postprocess(text: str, recommendations: list[dict]) -> tuple[str, boo
             modified = True
 
     # If critical/high findings exist, verify they're mentioned in the review
-    critical_high = [
-        r for r in recommendations
-        if r.get("severity") in ("critical", "high")
-    ]
+    critical_high = [r for r in recommendations if r.get("severity") in ("critical", "high")]
     if critical_high and not modified:
         titles = [r.get("title", "").lower() for r in critical_high]
         mentioned = any(title in text_lower for title in titles if title)
@@ -161,9 +189,21 @@ def generate_review(payload: dict) -> dict:
     compact = {
         "score": payload.get("scores", {}).get("overall"),
         "grade": payload.get("scores", {}).get("grade"),
+        "scope": payload.get("scores", {}).get("scope"),
         "resources": len(payload.get("resources", [])),
         "monthly_cost": payload.get("finops", {}).get("current_monthly"),
         "optimized_cost": payload.get("finops", {}).get("optimized_monthly"),
+        "modules": [
+            {
+                "module": m.get("address"),
+                "source": m.get("source"),
+                "version": m.get("version"),
+                "expanded": m.get("expansion") == "expanded",
+                "expansion_state": m.get("expansion"),
+                "known_resource_count": m.get("resource_count", 0),
+            }
+            for m in payload.get("modules", [])
+        ],
         "recommendations": [
             {
                 "key": r.get("key"),
@@ -193,7 +233,11 @@ def generate_review(payload: dict) -> dict:
         "IMPORTANT: Do NOT invent AWS prices, runtime metrics (CPU/memory/network), "
         "or performance data. Only discuss what can be determined from the "
         "Terraform configuration. Use language like 'the configuration does not "
-        "declare X' rather than 'X is missing at runtime'."
+        "declare X' rather than 'X is missing at runtime'.\n\n"
+        'IMPORTANT: For modules with "expanded": false, the module source was '
+        "not inspected. Do not infer their internal resources or settings — "
+        "describe only the declaration (address, source, version) and state that "
+        "their contents were not analyzed."
     )
     text = asyncio.run(provider.complete(_SYSTEM_PROMPT, user_prompt))
 
@@ -240,8 +284,6 @@ def generate_hcl_assist(recommendation: dict, config: dict) -> dict:
 
     try:
         import asyncio
-
-        from app.services.optimization.render import validate_generated_code, render_optimized_project
 
         user_prompt = (
             f"Generate Terraform HCL for the following recommendation:\n\n"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTheme } from "next-themes";
 import { useAnalysis } from "@/lib/analysis-context";
 import { ErrorPanel, LoadingPanel } from "@/components/dashboard/states";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,9 @@ import { MaterialIcon } from "@/components/ui/material-icon";
 
 export default function SettingsPage() {
   const { data, loading, error } = useAnalysis();
+  const { theme, setTheme } = useTheme();
   const [apiUrl, setApiUrl] = useState(API_URL);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
 
   if (loading && !data) return <LoadingPanel />;
   if (error && !data) return <ErrorPanel message={error} />;
@@ -75,7 +76,7 @@ export default function SettingsPage() {
                 <p className="text-sm font-medium text-md-on-surface">Dark theme</p>
                 <p className="text-xs text-md-on-surface-variant">Switch to a dark workspace.</p>
               </div>
-              <Switch checked={darkMode} onCheckedChange={setDarkMode} />
+              <Switch checked={theme === "dark"} onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")} />
             </div>
             <div className="flex items-center justify-between">
               <div>

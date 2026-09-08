@@ -9,12 +9,10 @@ import { MaterialIcon } from "@/components/ui/material-icon";
 
 const NAV = [
   { href: "/dashboard", label: "Overview", icon: "grid_view" },
-  { href: "/dashboard/optimization", label: "Optimize", icon: "auto_fix_high" },
   { href: "/dashboard/comparison", label: "Cloud Compare", icon: "cloud_queue" },
   { href: "/dashboard/finops", label: "FinOps", icon: "payments" },
   { href: "/dashboard/score", label: "Score", icon: "grade" },
   { href: "/dashboard/architecture", label: "Architecture", icon: "hub" },
-  { href: "/dashboard/analysis", label: "Resources", icon: "dns" },
 ];
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -61,6 +59,7 @@ function Topbar({ onMenuOpen }: { onMenuOpen: () => void }) {
         <button
           className="md:hidden text-md-on-surface-variant hover:bg-md-surface-container-high p-2 rounded-full transition-colors"
           onClick={onMenuOpen}
+          aria-label="Open navigation menu"
         >
           <MaterialIcon name="menu" />
         </button>
@@ -103,16 +102,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       </main>
 
       <nav className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2.5 bg-md-surface-container border-t border-md-outline-variant">
-        <Link href="/dashboard" className="flex flex-col items-center justify-center text-md-on-surface-variant h-10 w-10 hover:bg-md-primary-container/20 rounded-full transition-colors">
+        <Link href="/dashboard" aria-label="Overview" className="flex flex-col items-center justify-center text-md-on-surface-variant h-10 w-10 hover:bg-md-primary-container/20 rounded-full transition-colors">
           <MaterialIcon name="home" className="text-[20px]" />
         </Link>
-        <Link href="/dashboard/optimization" className="flex flex-col items-center justify-center text-md-on-surface-variant h-10 w-10 hover:bg-md-primary-container/20 rounded-full transition-colors">
-          <MaterialIcon name="auto_fix_high" className="text-[20px]" />
-        </Link>
-        <Link href="/dashboard/finops" className="flex flex-col items-center justify-center text-md-on-surface-variant h-10 w-10 hover:bg-md-primary-container/20 rounded-full transition-colors">
+        <Link href="/dashboard/finops" aria-label="FinOps" className="flex flex-col items-center justify-center text-md-on-surface-variant h-10 w-10 hover:bg-md-primary-container/20 rounded-full transition-colors">
           <MaterialIcon name="payments" className="text-[20px]" />
         </Link>
-        <Link href="/dashboard/comparison" className="flex flex-col items-center justify-center text-md-on-surface-variant h-10 w-10 hover:bg-md-primary-container/20 rounded-full transition-colors">
+        <Link href="/dashboard/comparison" aria-label="Cloud Compare" className="flex flex-col items-center justify-center text-md-on-surface-variant h-10 w-10 hover:bg-md-primary-container/20 rounded-full transition-colors">
           <MaterialIcon name="cloud_queue" className="text-[20px]" />
         </Link>
       </nav>

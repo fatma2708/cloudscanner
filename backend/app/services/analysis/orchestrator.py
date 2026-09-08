@@ -28,11 +28,15 @@ from __future__ import annotations
 
 from app.services.architecture.service import build_graph
 from app.services.finops.service import build_finops
+from app.services.llm.router import LLMConfigError
 from app.services.llm.service import generate_review
+from app.services.ml_scoring import predict as predict_ml
 from app.services.optimization.engine import optimize
+from app.services.optimization.render import render_generated_code
 from app.services.pricing.comparison import compare_providers
 from app.services.pricing.engine import estimate_all, estimate_all_detailed
 from app.services.recommendations.engine import run_recommendations
+from app.services.risk_intelligence.pipeline import classify_resources
 from app.services.scoring.service import compute_scores
 from app.services.sustainability.service import estimate_carbon
 from app.services.terraform.parser import parse_terraform_files
@@ -55,6 +59,23 @@ _COMPARE_CATEGORIES = {
 }
 
 
+def _finding_ml_classification(targets: list[str], by_id: dict[str, dict | None]) -> dict | None:
+    """Resolve the advisory CRIM classification for a finding.
+
+    A finding may target several resources; CRIM classifies the resource, not the
+    rule. The classification is shared unchanged only when every targeted resource
+    agreed, so rule identity never influences the ML input. Targets outside the
+    classified resources (e.g. data sources) yield ``None``.
+    """
+    values = [by_id[target] for target in targets if target in by_id]
+    if not values:
+        return None
+    first = values[0]
+    if any(value != first for value in values):
+        return None
+    return first
+
+
 def analyze(
     files: dict[str, str],
     mode: str = "balanced",
@@ -63,6 +84,11 @@ def analyze(
 ) -> dict:
     """Analyze Terraform files and return the complete analysis payload."""
     config = parse_terraform_files(files=files, provider=provider, default_region=default_region)
+
+    crim_by_address, crim_summary = classify_resources(config)
+    crim_by_id = {
+        resource.id: crim_by_address.get(resource.address) for resource in config.resources
+    }
 
     # 1. Costs
     costs = estimate_all(config.resources)
@@ -134,7 +160,15 @@ def analyze(
     # 2. Recommendations + scores
     recommendations = run_recommendations(config, mode=mode)
     scores = compute_scores(config, recommendations)
-    scores["evidence_coverage_formula"] = "sum(dimensions_with_evidence * weight) / sum(weight_of_dimensions_with_evidence)"
+    ml_predictions = []
+    for resource in config.resources:
+        if resource.is_data:
+            continue
+        prediction = predict_ml(resource)
+        ml_predictions.append({"resource_id": resource.id, **prediction})
+    scores["evidence_coverage_formula"] = (
+        "sum(dimensions_with_evidence * weight) / sum(weight_of_dimensions_with_evidence)"
+    )
 
     # 3. Optimization plan (uses canonical baseline)
     plan = optimize(config, recommendations, current_monthly=baseline_total, mode=mode)
@@ -162,33 +196,76 @@ def analyze(
     graph = build_graph(config)
 
     # 6. Narrative review (pass full config context for LLM guardrails)
+    modules_payload = [m.to_dict() for m in config.modules]
     review_payload = {
         "scores": scores,
         "finops": finops,
         "recommendations": [r.to_dict() for r in recommendations],
         "resources": [r.to_dict() for r in config.resources],
+        "modules": modules_payload,
         "config_summary": {
             "resource_types": sorted({r.resource_type for r in config.resources}),
             "services": sorted({r.service for r in config.resources}),
             "regions": sorted({r.region for r in config.resources if r.region}),
-            "modules": config.modules,
+            "modules": [
+                {
+                    "module": m.address,
+                    "source": m.source,
+                    "version": m.version,
+                    "expanded": m.expansion == "expanded",
+                }
+                for m in config.modules
+            ],
         },
     }
-    review = generate_review(review_payload)
+    try:
+        review = generate_review(review_payload)
+    except LLMConfigError:
+        review = _fallback_review(review_payload)
 
     # 7. Analysis metadata
     from app.core.config import get_settings
+
     settings = get_settings()
     metadata = _build_metadata(settings, config, scores, recommendations)
+
+    # When no LLM provider is configured, the analysis is rule-engine only.
+    # Strip ML classifications so the UI does not show ML badges that would
+    # be misleading — the CRIM model output is advisory metadata, not a
+    # full ML review.
+    ml_available = metadata["llm_provider"] != "none"
 
     # Count assessed dimensions for score transparency
     assessed = sum(1 for c in scores["categories"] if c.get("evidence_status") == "available")
     total_dims = len(scores["categories"])
 
+    unexpanded = config.unexpanded_modules()
+    resource_count = len([r for r in config.resources if not r.is_data])
+    data_source_count = len([r for r in config.resources if r.is_data])
+    module_count = len(config.modules)
+
     return {
-        "resources": [r.to_dict() for r in config.resources],
+        "resources": [
+            {
+                **resource.to_dict(),
+                "ml_classification": (
+                    crim_by_address.get(resource.address) if ml_available else None
+                ),
+            }
+            for resource in config.resources
+        ],
+        "modules": modules_payload,
         "graph": graph,
-        "recommendations": [r.to_dict() for r in recommendations],
+        "recommendations": [
+            {
+                **r.to_dict(),
+                "ml_classification": (
+                    _finding_ml_classification(r.target, crim_by_id) if ml_available else None
+                ),
+                "generated_code_hcl": render_generated_code(r.generated_code),
+            }
+            for r in recommendations
+        ],
         "scores": scores,
         "costs": {
             "current_monthly": baseline_total,
@@ -197,21 +274,44 @@ def analyze(
             "usage_available": False,
             "confidence": total_confidence,
             "detailed": detailed_costs,
+            # Unexpanded modules are infrastructure CloudPilot could not
+            # price — reported explicitly instead of silently $0.
+            "modules_unquantified": [
+                {
+                    "address": m.address,
+                    "source": m.source,
+                    "version": m.version,
+                    "reason": (
+                        "Module source was not available for resource-level pricing."
+                        if m.expansion != "expanded"
+                        else ""
+                    ),
+                }
+                for m in unexpanded
+            ],
         },
         "comparison": comparison,
         "carbon": carbon,
         "finops": finops,
         "optimization": plan.summary,
         "review": review,
+        "ml": {
+            "predictions": ml_predictions,
+            "ml_unavailable": bool(ml_predictions)
+            and all(prediction["ml_unavailable"] for prediction in ml_predictions),
+        },
+        "crim": crim_summary,
         "analysis_metadata": metadata,
         "summary": {
-            "resource_count": len([r for r in config.resources if not r.is_data]),
-            "data_source_count": len([r for r in config.resources if r.is_data]),
-            "total_block_count": len(config.resources),
+            "resource_count": resource_count,
+            "data_source_count": data_source_count,
+            "module_count": module_count,
+            "unexpanded_module_count": len(unexpanded),
+            "total_block_count": resource_count + data_source_count + module_count,
             "providers": sorted({r.provider for r in config.resources}),
             "services": sorted({r.service for r in config.resources}),
             "regions": sorted({r.region for r in config.resources}),
-            "modules": config.modules,
+            "modules": modules_payload,
             "variables": list(config.variables.keys()),
             "current_monthly": baseline_total,
             "known_monthly": baseline_total,
@@ -227,6 +327,8 @@ def analyze(
             "dimensions_total": total_dims,
             "evidence_coverage": scores.get("evidence_coverage", "unknown"),
             "evidence_coverage_pct": scores.get("evidence_coverage_pct", 0.0),
+            "scope": scores.get("scope", "complete_configuration"),
+            "scope_label": scores.get("scope_label", "Full configuration"),
         },
     }
 
@@ -275,7 +377,6 @@ def _cost_confidence_reasons(detailed: list[dict]) -> list[str]:
 
     usage_based = [d for d in detailed if d.get("cost_classification") == "usage_based"]
     unknown = [d for d in detailed if d.get("confidence") == "unknown"]
-    estimated = [d for d in detailed if d.get("cost_classification") == "estimated"]
     fixed = [d for d in detailed if d.get("cost_classification") == "fixed"]
 
     if usage_based:
@@ -290,7 +391,11 @@ def _cost_confidence_reasons(detailed: list[dict]) -> list[str]:
     if has_transfer:
         reasons.append("Data transfer volumes not available")
 
-    has_request = any("requests" in d.get("assumptions", "").lower() or "invocations" in d.get("assumptions", "").lower() for d in detailed)
+    has_request = any(
+        "requests" in d.get("assumptions", "").lower()
+        or "invocations" in d.get("assumptions", "").lower()
+        for d in detailed
+    )
     if has_request:
         reasons.append("Request volumes not available")
 
@@ -303,13 +408,91 @@ def _cost_confidence_reasons(detailed: list[dict]) -> list[str]:
     return reasons
 
 
+def _fallback_review(payload: dict) -> dict:
+    """Deterministic review used when no LLM provider is configured.
+
+    Mirrors the shape returned by :func:`generate_review` so downstream
+    consumers need no special handling.
+    """
+    scores = payload.get("scores", {})
+    finops = payload.get("finops", {})
+    recommendations = payload.get("recommendations", [])
+
+    grade = scores.get("grade", "N/A")
+    overall = scores.get("overall")
+    current = finops.get("current_monthly")
+    optimized = finops.get("optimized_monthly")
+
+    lines = [
+        "## Automated review (LLM not configured)",
+        "",
+        "No LLM API key is configured, so this review was generated by the",
+        "deterministic rules engine. Set `HF_API_KEY` (or another provider key)",
+        "to enable narrative AI reviews.",
+        "",
+        f"- **Production readiness score:** {overall if overall is not None else 'N/A'} "
+        f"(grade {grade})",
+    ]
+    if current is not None:
+        line = f"- **Estimated monthly cost:** ${current:,.2f}"
+        if optimized is not None and optimized < current:
+            line += f" (optimized: ${optimized:,.2f})"
+        lines.append(line)
+
+    by_severity: dict[str, int] = {}
+    for r in recommendations:
+        sev = r.get("severity", "unknown")
+        by_severity[sev] = by_severity.get(sev, 0) + 1
+    if by_severity:
+        summary = ", ".join(f"{count} {sev}" for sev, count in sorted(by_severity.items()))
+        lines.append(f"- **Findings:** {len(recommendations)} ({summary})")
+
+    modules = payload.get("modules", [])
+    unexpanded = [m for m in modules if not m.get("expanded")]
+    if unexpanded:
+        lines += [
+            "",
+            "**Modules detected but not expanded:**",
+        ]
+        for m in unexpanded:
+            source = m.get("source") or "unknown source"
+            version = f" v{m.get('version')}" if m.get("version") else ""
+            lines.append(
+                f"- `{m.get('module')}` — {source}{version}. Module source not "
+                "included in upload; detailed module resource analysis unavailable."
+            )
+        lines.append(
+            "\nModule costs are **not quantified** and the score reflects the "
+            "root configuration only."
+        )
+
+    top = [r for r in recommendations if r.get("severity") in ("critical", "high")]
+    if top:
+        lines += ["", "**Priority actions:**"]
+        for r in top[:5]:
+            lines.append(f"- [{r.get('severity', '').upper()}] {r.get('title', 'Unknown')}")
+
+    text = "\n".join(lines)
+
+    return {
+        "provider": "rule-engine",
+        "executive_summary": text.split("\n\n")[0],
+        "architecture_review": text,
+        "top_severities": [],
+        "guardrail_applied": False,
+    }
+
+
 def _build_metadata(settings, config, scores, recommendations) -> dict:
     """Build analysis metadata for transparency."""
+    from app.services.llm.router import LLMConfigError, get_provider
     from app.services.recommendations.rules import ALL_RULES
-    from app.services.llm.router import get_provider
 
-    provider = get_provider(settings)
-    provider_name = provider.name
+    try:
+        provider = get_provider(settings)
+        provider_name = provider.name
+    except LLMConfigError:
+        provider_name = "none"
 
     # Resolve display model name from settings
     model_name = ""
@@ -327,6 +510,7 @@ def _build_metadata(settings, config, scores, recommendations) -> dict:
         "openai": "OpenAI",
         "anthropic": "Anthropic",
         "gemini": "Google Gemini",
+        "none": "Rule engine only",
     }.get(provider_name, provider_name)
 
     return {
@@ -335,6 +519,8 @@ def _build_metadata(settings, config, scores, recommendations) -> dict:
         "llm_provider_label": provider_label,
         "rules_evaluated": len(ALL_RULES),
         "resources_parsed": len(config.resources),
+        "modules_detected": len(config.modules),
+        "modules_expanded": sum(1 for m in config.modules if m.expansion == "expanded"),
         "cost_estimates_confident": _aggregate_cost_confidence(
             estimate_all_detailed(config.resources)
         )["level"],

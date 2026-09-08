@@ -19,15 +19,14 @@ from __future__ import annotations
 import re
 
 from app.services.pricing.catalog import GRID_INTENSITY, grid_intensity
-from app.services.pricing.engine import _count_of
 from app.services.terraform.parser import TerraformConfig
 
 HOURS_PER_MONTH = 730.0
 
 # Grid intensity thresholds (gCO2e/kWh) — based on IEA 2023 averages
-_GRID_LOW = 300       # e.g. eu-west-1, eu-central-1, us-west-2 (hydro)
+_GRID_LOW = 300  # e.g. eu-west-1, eu-central-1, us-west-2 (hydro)
 _GRID_MODERATE = 450  # e.g. us-east-1, ap-southeast-1
-_GRID_HIGH = 600      # e.g. ap-south-1, some coal-heavy regions
+_GRID_HIGH = 600  # e.g. ap-south-1, some coal-heavy regions
 
 # Pattern for valid AWS region names (e.g. us-east-1, eu-west-2, ap-southeast-1)
 _VALID_REGION_RE = re.compile(r"^[a-z]{2}-[a-z]+-[0-9]+$")
@@ -85,14 +84,10 @@ def estimate_carbon(config: TerraformConfig, optimized_monthly: float) -> dict:
         if res.region and _is_valid_region(res.region):
             region_counts[res.region] = region_counts.get(res.region, 0) + 1
     dominant_region = max(region_counts, key=region_counts.get) if region_counts else "us-east-1"
-    dominant_rating = region_ratings.get(dominant_region, "moderate")
 
     # Greener regions: regions with lower intensity than dominant
     dominant_intensity = grid_intensity(dominant_region)
-    greener = [
-        r for r, i in GRID_INTENSITY.items()
-        if i < dominant_intensity * 0.7
-    ][:4]
+    greener = [r for r, i in GRID_INTENSITY.items() if i < dominant_intensity * 0.7][:4]
 
     # Resource composition
     ec2_count = _compute_count(config, "ec2")
@@ -111,7 +106,13 @@ def estimate_carbon(config: TerraformConfig, optimized_monthly: float) -> dict:
 
     # Determine optimization potential
     has_idle_compute = ec2_count > 2 or (ec2_count > 0 and rds_count > 0)
-    potential = "significant" if has_idle_compute else "moderate" if ec2_count > 0 or lambda_count > 0 else "minimal"
+    potential = (
+        "significant"
+        if has_idle_compute
+        else "moderate"
+        if ec2_count > 0 or lambda_count > 0
+        else "minimal"
+    )
 
     # Qualitative notes
     notes: list[str] = []
@@ -126,9 +127,7 @@ def estimate_carbon(config: TerraformConfig, optimized_monthly: float) -> dict:
             "draw ~20% less power per task than x86 equivalents."
         )
     if has_graviton:
-        notes.append(
-            "Graviton (ARM) instances already in use — good energy efficiency posture."
-        )
+        notes.append("Graviton (ARM) instances already in use — good energy efficiency posture.")
     if lambda_count > 0:
         notes.append(
             "Serverless (Lambda) functions scale to zero when idle, which is "

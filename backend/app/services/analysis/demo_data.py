@@ -22,6 +22,11 @@ def load_sample_files() -> dict[str, str]:
             pass
         return files
     for child in sorted(_SAMPLE_DIR.iterdir()):
+        # ``overrides.tf`` contains a duplicate declaration used during local
+        # development. It is not a Terraform override filename and would make
+        # the public demo double-count that resource.
+        if child.name == "overrides.tf":
+            continue
         if child.is_file() and child.name.endswith((".tf", ".tofu")):
             files[child.name] = child.read_text(encoding="utf-8")
     return files

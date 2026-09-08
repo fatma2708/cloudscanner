@@ -1,181 +1,183 @@
+<div align="center">
+
 # CloudPilot AI
 
-> **AI-powered cloud infrastructure optimization platform.** Point CloudPilot at your Terraform or OpenTofu code and it parses every resource, prices it across 10 cloud providers, gives you a production readiness score, and generates copy-paste-ready optimized infrastructure code.
+**Analyze, score, and optimize your Terraform infrastructure across 10 cloud providers.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](backend/pyproject.toml)
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](backend/pyproject.toml)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](backend)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000.svg)](frontend)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6.svg)](frontend)
+
+Point CloudPilot at any Terraform or OpenTofu repository and it parses every
+resource, prices it across 10 cloud providers, produces a production-readiness
+score, explains exactly what evidence it used — and flags what it could not
+inspect.
+
+</div>
 
 ---
 
 ## Table of contents
 
-- [What CloudPilot does](#what-cloudpilot-does)
-- [Architecture](#architecture)
+- [What it does](#what-it-does)
 - [Key features](#key-features)
+- [Architecture](#architecture)
 - [Technology stack](#technology-stack)
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
-  - [Docker (recommended)](#option-1--docker-recommended)
-  - [Local development](#option-2--local-development)
+  - [Option 1 — Docker (recommended)](#option-1--docker-recommended)
+  - [Option 2 — Local development](#option-2--local-development)
 - [Configuration](#configuration)
 - [API reference](#api-reference)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ---
 
-## What CloudPilot does
+## What it does
 
-CloudPilot takes Terraform `.tf` files as input and answers three questions:
+CloudPilot turns a Terraform codebase into answers:
 
-1. **What are you running?** — Parses every `resource`, `data`, `module`, `variable`, and `output` block. Extracts instance types, storage sizes, network configurations, and IAM policies. Maps them to real-world cloud services with per-resource cost estimates.
+1. **What are you running?** — A hand-rolled HCL2 parser extracts every
+   `resource`, `data`, `module`, `variable`, and `output` block — instance
+   types, storage sizes, network rules, IAM references — all with source file
+   and line-number provenance. No Terraform binary required.
 
-2. **How much does it cost?** — Prices every resource using current cloud provider pricing data. Shows cost breakdowns by service, by region, and by module. Compares costs across 10 cloud providers (AWS, Azure, GCP, DigitalOcean, Hetzner, Scaleway, OVHcloud, Oracle, Vultr, Linode).
+2. **How much does it cost?** — Every resource is priced against a built-in
+   catalog spanning **AWS, Azure, GCP, DigitalOcean, Hetzner, Scaleway,
+   OVHcloud, Oracle, Vultr, and Linode**, with per-service, per-region, and
+   per-module breakdowns.
 
-3. **How can you improve it?** — Runs 21 recommendation rules across 8 scoring dimensions (cost, security, reliability, performance, compliance, observability, maintainability, sustainability). Generates specific, actionable fixes with ready-to-apply Terraform code.
+3. **How healthy is it?** — A weighted **production-readiness score (0–100)**
+   across 8 dimensions, driven by 20+ deterministic rules and — when the repo is
+   not fully inspected (for example, local modules that weren't uploaded) — an
+   explicit evidence-coverage warning instead of a silent guess.
+
+4. **How do I improve it?** — Actionable, severity-ranked recommendations with
+   ready-to-apply Terraform fixes, multi-cloud comparison, and a FinOps view of
+   your spend.
+
+---
+
+## Key features
+
+### Custom HCL2 parser
+Hand-rolled Terraform parser with full interpolation handling. Resources keep
+their source file and line numbers from parse to presentation, so every finding
+links back to code.
+
+### Multi-cloud cost engine
+A normalized pricing catalog prices the same architecture on 10 providers.
+The comparison view shows per-service breakdowns, cost deltas, and
+provider-specific caveats side by side.
+
+### Production readiness score
+A weighted 0–100 score across **Cost, Security, Reliability, Performance,
+Compliance, Observability, Maintainability, and Sustainability**. The scorer
+publishes its evidence: a per-dimension breakdown, coverage percentage, and the
+specific dimensions that couldn't be assessed.
+
+### Evidence coverage honesty
+When modules could not be expanded or inspected, CloudPilot says so. The
+Overview and Score cards show a visible **"Incomplete — N modules not
+inspected"** badge whenever evidence coverage drops below the completeness
+threshold, so a low score is never mistaken for a full audit.
+
+### Architecture visualization
+Auto-laid-out topology graph of every resource, grouped by VPCs and security
+groups. Drag to pan, scroll or pinch to zoom, double-click to fit, and hover or
+click any node for detail.
+
+### FinOps dashboard
+Service-level spend breakdown, rightsizing candidates, spot-instance
+opportunities, a 12-month cost outlook, and carbon-footprint estimates.
+
+### AI-assisted analysis
+- A deterministic **rule engine** (20+ rules) — fast, repeatable, explainable.
+- An optional **LLM narrative review** (HuggingFace by default; OpenAI,
+  Anthropic, and Gemini supported).
+- A bundled **local risk-intelligence model (CRIM-v4.2)** that classifies
+  findings and recommendations at inference time — no cloud round-trip needed.
 
 ---
 
 ## Architecture
 
 ```
-                          ┌──────────────────────────────────────────────────┐
-                          │                    FRONTEND                      │
-                          │                 Next.js 16 + React 19            │
-                          │                                                  │
-                          │  Landing  │  Dashboard  │  Login  │  Settings   │
-                          └──────────────────────┬───────────────────────────┘
-                                                 │ REST API
-                                                 ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│                           BACKEND  (FastAPI)                               │
-│                                                                            │
-│  ┌─────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌─────────┐ │
-│  │  Auth    │   │ Projects │   │ Analyses │   │  Demo    │   │ Reports │ │
-│  │ (JWT)   │   │  (CRUD)  │   │ (trigger)│   │ (sample) │   │ (PDF)   │ │
-│  └─────────┘   └──────────┘   └────┬─────┘   └──────────┘   └─────────┘ │
-│                                    │                                       │
-│              ┌─────────────────────▼──────────────────────┐                │
-│              │           ANALYSIS PIPELINE                 │                │
-│              │                                             │                │
-│              │  ┌──────────┐  ┌────────┐  ┌────────────┐ │                │
-│              │  │   HCL    │─▶│ Pricer │─▶│ Recommend  │ │                │
-│              │  │  Parser  │  │(10     │  │ Engine     │ │                │
-│              │  │ (custom) │  │clouds) │  │ (21 rules) │ │                │
-│              │  └──────────┘  └────────┘  └─────┬──────┘ │                │
-│              │                                  │        │                │
-│              │  ┌──────────┐  ┌────────┐  ┌─────▼──────┐ │                │
-│              │  │   LLM    │  │ Scorer │  │ Optimizer  │ │                │
-│              │  │ Review   │  │ (8 dim)│  │ (7 modes)  │ │                │
-│              │  │(optional)│  └────────┘  └────────────┘ │                │
-│              │  └──────────┘                              │                │
-│              └─────────────────────────────────────────────┘                │
-│                                                                            │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                        SUPPORTING SERVICES                          │  │
-│  │  Architecture  │  FinOps  │  Sustainability  │  Comparison  │  LLM │  │
-│  │  Graph Builder │  (cost)  │  (CO2e)          │  (multi-cloud)│(API)│  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                            │
-└──────────────────────────────────────┬─────────────────────────────────────┘
-                                       │
-                                       ▼
-                          ┌──────────────────────┐
-                          │     PostgreSQL 16     │
-                          │  (users, projects,   │
-                          │   analysis history)   │
-                          └──────────────────────┘
+             ┌────────────────────────────────────────────────┐
+             │                    FRONTEND                     │
+             │         Next.js 16 + React 19 + TypeScript      │
+             │  Landing · Login · Overview · Architecture ·   │
+             │  Score · FinOps · Comparison · Settings          │
+             └───────────────────────┬────────────────────────┘
+                                     │  REST API  (FastAPI)
+                                     ▼
+┌───────────────────────────────────────────────────────────────┐
+│                         BACKEND (FastAPI)                     │
+│                                                               │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────┐  │
+│  │ Auth/JWT│  │Projects │  │Analyses │  │  Demo   │  │Risk │  │
+│  └─────────┘  └─────────┘  └────┬────┘  └─────────┘  └──┬──┘  │
+│                                 │                        │     │
+│            ┌────────────────────▼───────┐   ┌────────────▼──┐ │
+│            │       ANALYSIS PIPELINE      │   │  ML / CRIM    │ │
+│            │ ┌─────────┐ ┌───────┐ ┌─────┐│   │  features      │ │
+│            │ │   HCL   │▶│Pricing│▶│Rules││   │  + classifier  │ │
+│            │ │  Parser │ │(10    │ │(20+ ││   └───────────────┘ │
+│            │ │(custom) │ │clouds)│ │rules)││                     │
+│            │ └─────────┘ └───────┘ └──┬──┘│                     │
+│            │  ┌─────────┐  ┌──────────▼─┐│  ┌───────────────┐  │
+│            │  │  LLM    │  │   Scorer    ││  │  Supporting   │  │
+│            │  │ Review  │  │ (8 dims +   ││  │  services:    │  │
+│            │  │(optional)│ │  evidence)  ││  │  architecture,│  │
+│            │  └─────────┘  └────────────┘│  │  finops,       │  │
+│            │                              │  │  comparison,   │  │
+│            │                              │  │  sustainability│  │
+│            │                              │  └───────────────┘  │
+│            └──────────────────────────────┘                     │
+└───────────────────────────────┬────────────────────────────────┘
+                                ▼
+                    ┌───────────────────────┐
+                    │   PostgreSQL 16       │
+                    │  users · projects ·   │
+                    │  analysis history     │
+                    └───────────────────────┘
 ```
 
-### Pipeline flow
+### Analysis pipeline
 
 | Step | What happens |
 |------|-------------|
-| **1. Upload** | User provides Terraform files via the web UI or API. |
-| **2. Parse** | The custom HCL2 parser reads every block, extracts resource types, configurations, references, and line numbers. No Terraform binary required. |
-| **3. Price** | Each resource is priced across 10 cloud providers. Costs are aggregated by service, region, and module. |
-| **4. Analyze** | 21 recommendation rules evaluate the infrastructure across 8 dimensions. An optional LLM adds a narrative review. |
-| **5. Score** | A weighted score (0-100) is computed. Grade maps from A+ (95+) to F (<50). |
-| **6. Optimize** | The engine generates replacement Terraform code for each recommendation, based on the selected mode. |
-| **7. Display** | Results are shown in an interactive dashboard with charts, tables, architecture maps, and copy-paste-ready code. |
-
----
-
-## Key features
-
-### Infrastructure analysis
-
-CloudPilot includes a custom HCL2 parser (hand-rolled, no external Terraform binary required). It reads `.tf` files directly, extracts resource definitions with references and line numbers preserved, and resolves interpolation expressions. Every resource is tagged with its source file and line number so you can jump straight to the code.
-
-### AI-powered review
-
-CloudPilot sends the parsed architecture to the configured LLM (HuggingFace by default) for a narrative review. The LLM generates natural-language explanations while the deterministic rules engine provides structured, actionable recommendations. Both are used together — the rule engine flags issues, and the LLM provides the architect-level narrative.
-
-### Multi-cloud cost comparison
-
-CloudPilot prices your infrastructure across 10 cloud providers simultaneously. The comparison page shows a side-by-side bar chart and a detailed table with per-service cost breakdowns, delta percentages, and provider-specific notes.
-
-### 7 optimization modes
-
-Each mode re-plans your stack with different priorities:
-
-| Mode | What it optimizes for |
-|------|----------------------|
-| **Balanced** | Even mix of cost, reliability, and security |
-| **Lowest Cost** | Absolute minimum monthly spend |
-| **Startup Budget** | Cheapest viable production setup |
-| **Lowest Carbon** | Smallest environmental footprint |
-| **Lowest Latency** | Fastest network paths and response times |
-| **Reliability** | Maximum uptime and fault tolerance |
-| **Security** | Strongest security posture |
-
-### Production readiness score
-
-Your infrastructure gets a score from 0 to 100, broken down across 8 dimensions:
-
-| Dimension | What it measures |
-|-----------|-----------------|
-| **Cost** | Over-provisioning, cheaper alternatives |
-| **Security** | Exposed ports, open security groups, unencrypted storage |
-| **Reliability** | Single points of failure, redundancy |
-| **Performance** | Instance sizing for expected load |
-| **Compliance** | Missing tags, non-standard configurations |
-| **Observability** | Monitoring, logging, and alerting resources |
-| **Maintainability** | Code modularity, variable reuse |
-| **Sustainability** | Carbon footprint of the deployment |
-
-### Architecture visualization
-
-An auto-laid-out topology map shows all your resources as nodes with connections between them. VPCs and security groups are shown as grouping boundaries. Each node displays its type, cost, and status.
-
-### FinOps dashboard
-
-- Monthly spend by service (bar chart)
-- Rightsizing candidates
-- Spot instance opportunities
-- 12-month cost outlook (current vs. optimized annual spend)
-- Carbon footprint estimates
+| **1. Upload** | Point the web app at a public GitHub repo, or upload Terraform files directly. |
+| **2. Parse** | The built-in HCL2 parser reads every block and preserves references and line numbers. |
+| **3. Price** | Each resource is priced on 10 cloud providers; totals are aggregated by service, region, and module. |
+| **4. Analyze** | 20+ rules evaluate the stack across 8 dimensions. A local CRIM-v4.2 model classifies findings; an optional LLM adds a narrative review. |
+| **5. Score** | Weighted 0–100 score with a per-dimension breakdown and explicit evidence-coverage accounting. |
+| **6. Present** | Results surface in an interactive dashboard — cards, charts, an explorable architecture map, and copy-able fixes — including warnings when parts of the repo were not inspected. |
 
 ---
 
 ## Technology stack
 
 | Layer | Component | Technology |
-|-------|-----------|-----------|
-| **Frontend** | Framework | Next.js 16 (React 19) |
-| | Language | TypeScript |
-| | Styling | Tailwind CSS v4 |
-| | Components | shadcn/ui |
+|-------|-----------|------------|
+| **Frontend** | Framework | Next.js 16 (React 19, TypeScript) |
+| | Styling | Tailwind CSS v4 + Material Design 3 tokens |
+| | Components | shadcn/ui components with Material icon set |
 | | Charts | Recharts |
-| | Animations | Motion (Framer Motion) |
-| | Code highlighting | prism-react-renderer |
+| | Code rendering | prism-react-renderer |
 | **Backend** | Framework | FastAPI |
-| | Database | PostgreSQL + SQLAlchemy |
-| | Migrations | Alembic |
-| | Auth | JWT + bcrypt |
-| | Parser | Custom HCL2 parser |
-| | Pricing | Built-in catalog (10 providers) |
-| | Testing | pytest + httpx |
-| | Linting | ruff |
+| | Database | PostgreSQL 16 + SQLAlchemy + Alembic |
+| | Auth | JWT + bcrypt, optional Google/GitHub OAuth |
+| | Parsing | Custom HCL2 parser (no Terraform binary) |
+| | Pricing | Built-in catalog for 10 providers |
+| | ML | scikit-learn + joblib (local CRIM-v4.2 classifier) |
+| | Testing | pytest + httpx / ruff |
 | **Infra** | Containers | Docker + Docker Compose |
-| | CI | GitHub Actions |
+| | CI | GitHub Actions (`.github/workflows/ci.yml`) |
 
 ---
 
@@ -183,66 +185,59 @@ An auto-laid-out topology map shows all your resources as nodes with connections
 
 ```
 cloudscanner/
-├── backend/                         # Python backend (FastAPI)
+├── backend/                        # Python / FastAPI backend
 │   ├── app/
-│   │   ├── main.py                  # FastAPI entry point
-│   │   ├── api/                     # Route handlers
-│   │   │   ├── auth.py              # Login, register, OAuth
-│   │   │   ├── projects.py          # CRUD for projects
-│   │   │   ├── analyses.py          # Trigger and retrieve analyses
-│   │   │   ├── demo.py              # Demo endpoint (no auth)
-│   │   │   ├── optimization.py      # Optimization recommendations
-│   │   │   ├── architecture.py      # Architecture graph data
-│   │   │   ├── score.py             # Production readiness score
-│   │   │   ├── finops.py            # FinOps cost analysis
-│   │   │   ├── comparison.py        # Multi-cloud comparison
-│   │   │   ├── sustainability.py    # Carbon footprint
-│   │   │   └── reports.py           # PDF/CSV report generation
-│   │   ├── core/                    # Config, database, security
-│   │   ├── models/                  # SQLAlchemy ORM models
-│   │   ├── schemas/                 # Pydantic request/response models
-│   │   └── services/                # Business logic
-│   │       ├── orchestrator.py      # Analysis pipeline coordinator
-│   │       ├── hcl_parser.py        # Custom HCL2 parser
-│   │       ├── pricing.py           # Pricing catalog (10 providers)
-│   │       ├── recommendations.py   # 21 recommendation rules
-│   │       ├── scoring.py           # 8-dimension scoring engine
-│   │       ├── optimization.py      # Code generation (7 modes)
-│   │       ├── architecture.py      # Graph layout algorithm
-│   │       ├── finops.py            # Cost analysis and rightsizing
-│   │       ├── sustainability.py    # CO2e estimation
-│   │       ├── comparison.py        # Multi-cloud cost comparison
-│   │       └── llm.py              # LLM integration
-│   ├── tests/                       # pytest test suite
-│   ├── alembic/                     # Database migrations
-│   ├── pyproject.toml               # Python project config
+│   │   ├── main.py                 # FastAPI entry point
+│   │   ├── api/
+│   │   │   ├── router.py           # Aggregates all v1 routers
+│   │   │   └── v1/                 # health, auth, projects, analyses,
+│   │   │                           #   score, comparison, architecture,
+│   │   │                           #   finops, sustainability, reports,
+│   │   │                           #   scenario, demo, risk
+│   │   ├── core/                   # config, database, security, deps
+│   │   ├── models/                 # SQLAlchemy ORM models
+│   │   ├── models_ml/              # ML model loading / wrappers
+│   │   ├── schemas/                # Pydantic request/response schemas
+│   │   └── services/
+│   │       ├── analysis/           # pipeline orchestrator + demo data
+│   │       ├── terraform/          # HCL parser + registry resolution
+│   │       ├── pricing/            # catalog, engine, comparison
+│   │       ├── recommendations/    # 20+ deterministic rules + engine
+│   │       ├── scoring/            # 8-dimension score + evidence coverage
+│   │       ├── optimization/       # fix/code rendering helpers
+│   │       ├── architecture/       # topology graph builder
+│   │       ├── finops/             # cost analysis, rightsizing, trends
+│   │       ├── sustainability/     # carbon estimates
+│   │       ├── llm/                # provider router (HF, OpenAI, …)
+│   │       ├── ml/                 # CRIM feature engineering
+│   │       └── risk_intelligence/  # CRIM-v4.2 classifier service
+│   ├── docs/                       # design docs (CRIM_V4_2.md)
+│   ├── models/                     # pre-trained model artifacts
+│   ├── tests/                      # pytest suite
+│   ├── scripts/                    # seed_demo.py + sample project
+│   ├── alembic/                    # database migrations
+│   ├── pyproject.toml
 │   └── Dockerfile
 │
-├── frontend/                        # Next.js frontend
+├── frontend/                       # Next.js 16 frontend
 │   ├── src/
-│   │   ├── app/                     # Pages and layouts
-│   │   │   ├── page.tsx             # Landing page
-│   │   │   ├── login/               # Login/register
-│   │   │   └── dashboard/           # Dashboard pages
-│   │   │       ├── optimization/    # Recommendations + code
-│   │   │       ├── architecture/    # Architecture map
-│   │   │       ├── score/           # Score breakdown
-│   │   │       ├── finops/          # Cost management
-│   │   │       └── comparison/      # Multi-cloud comparison
+│   │   ├── app/                    # landing, login, and dashboard routes
+│   │   │   └── dashboard/          # Overview, Architecture, Score,
+│   │   │                           #   FinOps, Comparison, Settings
 │   │   ├── components/
-│   │   │   ├── dashboard/           # Dashboard components
-│   │   │   ├── ui/                  # Reusable UI primitives
-│   │   │   └── hcl/                 # Terraform code highlighter
-│   │   └── lib/
-│   │       ├── api.ts               # API client
-│   │       ├── types.ts             # TypeScript types
-│   │       └── format.ts            # Currency/number formatting
+│   │   │   ├── dashboard/          # cards, evidence badges, CRIM chips
+│   │   │   ├── architecture/       # interactive SVG canvas
+│   │   │   ├── charts/             # recharts wrappers
+│   │   │   └── ui/                 # shadcn/ui primitives
+│   │   └── lib/                    # API client, types, formatting
+│   ├── public/
 │   ├── package.json
 │   └── Dockerfile
 │
-├── docker-compose.yml               # Full stack orchestration
-├── Makefile                         # Common commands
-├── .env.example                     # Environment variable template
+├── scripts/sample_project/         # sample Terraform for quick smoke tests
+├── docker-compose.yml              # full-stack orchestration
+├── Makefile                        # common commands
+├── .env.example                    # environment variable template
 └── README.md
 ```
 
@@ -252,121 +247,159 @@ cloudscanner/
 
 ### Option 1 — Docker (recommended)
 
-**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Docker Compose v2, at least 4 GB free RAM.
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/) with Docker
+Compose v2, at least 4 GB of free RAM.
 
 ```bash
-git clone <your-repo-url> cloudscanner
+git clone https://github.com/<your-org>/cloudscanner.git
 cd cloudscanner
+cp .env.example .env                 # then fill in JWT_SECRET / LLM keys
 docker compose up --build
 ```
 
 | Service | URL |
 |---------|-----|
 | Frontend | http://localhost:3000 |
-| Backend API docs | http://localhost:8000/docs |
+| Backend API docs (Swagger) | http://localhost:8000/docs |
 | Health check | http://localhost:8000/api/v1/health |
 | Demo analysis | http://localhost:8000/api/v1/demo/analyze |
 
 ### Option 2 — Local development
 
-**Prerequisites:** Python 3.11+, Node.js 18+, PostgreSQL 14+ (or SQLite for quick testing).
+**Prerequisites:** Python 3.11+, Node.js 18+, PostgreSQL 14+ (or SQLite for a
+quick look).
 
 ```bash
-# Backend
+# 1. Backend
 cd backend
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8000
 
-# Frontend (separate terminal)
+# 2. Frontend (separate terminal)
 cd frontend
 npm install
-npm run dev
+npm run dev                          # http://localhost:3000
 ```
+
+When the dashboard opens, click **"Or explore the demo project"** to see a full
+analysis without configuring a repository.
 
 ---
 
 ## Configuration
 
-All settings are configured via environment variables. Copy `.env.example` to `.env` and edit it.
-
-### Core settings
+All settings are environment variables. Copy `.env.example` to `.env` and edit.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:///./cloudpilot.db` | Database connection string |
-| `JWT_SECRET` | `dev-only-secret` | JWT signing key (**change in production**) |
-| `CORS_ORIGINS` | `http://localhost:3000` | Allowed frontend URLs |
-| `STORAGE_ROOT` | `./storage` | Uploaded Terraform file storage |
+| `JWT_SECRET` | `change-me-in-production` | JWT signing key (**change in production**) |
+| `CORS_ORIGINS` | `http://localhost:3000` | Allowed frontend origins (comma-separated) |
+| `STORAGE_ROOT` | `./storage` | Uploaded artifact storage location |
 
-### LLM settings
+### LLM (optional)
 
-CloudPilot uses an LLM for narrative architecture reviews. HuggingFace is the default provider.
+CloudPilot works without an LLM — the deterministic rule engine is
+self-contained. Set a provider to add narrative reviews.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_PROVIDER` | `huggingface` | `huggingface`, `openai`, `anthropic`, or `gemini` |
-| `HF_API_KEY` | — | HuggingFace API key (default provider) |
-| `HF_MODEL` | `Qwen/Qwen3-Coder-30B-A3B-Instruct` | HuggingFace model to use |
-| `OPENAI_API_KEY` | — | OpenAI API key (if using OpenAI) |
-| `ANTHROPIC_API_KEY` | — | Anthropic API key (if using Anthropic) |
-| `GEMINI_API_KEY` | — | Google Gemini API key (if using Gemini) |
+| `HF_API_KEY` | — | HuggingFace API key |
+| `HF_BASE_URL` | `https://router.huggingface.co/v1` | HuggingFace OpenAI-compatible endpoint |
+| `HF_MODEL` | `Qwen/Qwen3-Coder-30B-A3B-Instruct` | Model to use |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | — | API keys for alternative providers |
+
+### OAuth (optional)
+
+Set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and/or
+`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` to enable social login.
 
 ---
 
 ## API reference
 
-Full interactive docs at http://localhost:8000/docs (Swagger UI).
+Interactive docs are available at http://localhost:8000/docs (Swagger UI).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/v1/health` | GET | Service health |
 | `/api/v1/auth/register` | POST | Create account |
 | `/api/v1/auth/login` | POST | Sign in, get JWT |
 | `/api/v1/projects` | GET/POST | List or create projects |
-| `/api/v1/projects/{id}` | GET/DELETE | Get or delete project |
-| `/api/v1/analyses` | POST | Trigger analysis |
-| `/api/v1/analyses/{id}` | GET | Get analysis results |
-| `/api/v1/analyses/{id}/optimization` | GET | Optimization recommendations |
-| `/api/v1/analyses/{id}/architecture` | GET | Architecture graph |
-| `/api/v1/analyses/{id}/score` | GET | Production score |
-| `/api/v1/analyses/{id}/finops` | GET | FinOps data |
-| `/api/v1/analyses/{id}/comparison` | GET | Multi-cloud comparison |
-| `/api/v1/analyses/{id}/sustainability` | GET | Carbon footprint |
+| `/api/v1/projects/{project_id}` | GET/DELETE | Get or delete a project |
+| `/api/v1/analyses` | GET | List saved analyses |
+| `/api/v1/analyses/{analysis_id}` | GET | Analysis results |
+| `/api/v1/analyses/{project_id}/analyze-zip` | POST | Analyze an uploaded archive for a project |
+| `/api/v1/analyses/{project_id}/analyze-github` | POST | Analyze a GitHub repo for a project |
+| `/api/v1/score` | POST | Production-readiness score (Terraform payload) |
+| `/api/v1/architecture` | POST | Architecture graph |
+| `/api/v1/finops` | POST | FinOps breakdown |
+| `/api/v1/comparison` | POST | Multi-cloud comparison |
+| `/api/v1/comparison/providers` | GET | Supported provider catalog |
+| `/api/v1/sustainability` | POST | Carbon estimates |
+| `/api/v1/scenario` | POST | What-if scenarios |
+| `/api/v1/reports/{analysis_id}` | GET | Generated reports |
+| `/api/v1/risk/classify` | POST | CRIM-v4.2 finding classification |
 | `/api/v1/demo/analyze` | GET | Demo analysis (no auth) |
+| `/api/v1/demo/analyze/{mode}` | GET | Demo analysis with a specific mode |
+| `/api/v1/demo/analyze-github` | GET | Demo analysis from a public GitHub repo |
+
+> All `/api/v1/*` routes are prefixed by the API gateway. Analysis endpoints
+> accept Terraform files via JSON payload (see `backend/app/schemas/analysis.py`
+> and the Swagger docs at http://localhost:8000/docs).
 
 ---
 
 ## Testing
 
 ```bash
-# Backend
+# Backend (lint + format + tests)
 cd backend
-python -m pytest -v
+python -m ruff check app tests scripts
+python -m ruff format --check app tests scripts
+python -m pytest -q
 
-# Frontend
+# Frontend (lint + unit tests + production build)
 cd frontend
 npm run lint
+npx vitest run
 npm run build
 
-# Both
-make lint
+# Or use the Makefile from the repo root
+make test      # backend tests
+make lint      # ruff + eslint
 ```
+
+The CI pipeline (`.github/workflows/ci.yml`) runs all of these on every push
+and pull request.
 
 ---
 
 ## Troubleshooting
 
-**"Connection refused" on the frontend** — Ensure the backend is running on port 8000 and `NEXT_PUBLIC_API_URL` is set correctly.
+**Frontend can't reach the backend** — Make sure the backend runs on port 8000
+and `NEXT_PUBLIC_API_URL` points at it (`http://localhost:8000` for local dev).
 
-**"Module not found" errors** — Run `rm -rf node_modules && npm install` in the frontend directory.
+**Module not found errors** — Reinstall dependencies:
+`rm -rf node_modules && npm install` (frontend), or
+`pip install -e ".[dev]"` (backend).
 
-**Database errors on startup** — If using PostgreSQL, make sure it's running and run `alembic upgrade head`.
+**Database errors on startup** — For PostgreSQL, confirm the server is running
+and execute `make migrate` (or `alembic upgrade head`) to apply migrations.
 
-**LLM review not working** — Ensure `HF_API_KEY` is set in your `.env` file. The HuggingFace provider is used by default.
+**No narrative LLM review** — The app is fully functional without one; to enable
+it, set `LLM_PROVIDER` and the matching API key in `.env`.
+
+**Findings say modules weren't inspected** — Local modules need their source
+uploaded with the repo. The evidence-coverage badge tells you exactly how many
+modules were not inspected and why.
 
 ---
 
 ## License
 
-Private project. See project owners for licensing information.
+MIT — see the project owners for details. The bundled CRIM-v4.2 risk-intelligence
+model is described in [`backend/docs/CRIM_V4_2.md`](backend/docs/CRIM_V4_2.md).

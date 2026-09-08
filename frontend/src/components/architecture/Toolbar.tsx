@@ -1,6 +1,7 @@
 interface Props {
   visibleCount: number;
   edgeCount: number;
+  zoom: number;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   showSupporting: boolean;
@@ -13,6 +14,7 @@ interface Props {
 export function Toolbar({
   visibleCount,
   edgeCount,
+  zoom,
   searchQuery,
   onSearchChange,
   showSupporting,
@@ -27,6 +29,7 @@ export function Toolbar({
         onClick={onZoomIn}
         className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors"
         title="Zoom in"
+        aria-label="Zoom in"
       >
         <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="7" cy="7" r="5" />
@@ -37,6 +40,7 @@ export function Toolbar({
         onClick={onZoomOut}
         className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors"
         title="Zoom out"
+        aria-label="Zoom out"
       >
         <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="7" cy="7" r="5" />
@@ -47,6 +51,7 @@ export function Toolbar({
         onClick={onFit}
         className="p-1.5 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors"
         title="Fit to screen"
+        aria-label="Fit to screen"
       >
         <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="2" width="12" height="12" rx="2" />
@@ -73,7 +78,7 @@ export function Toolbar({
       </label>
 
       <span className="text-[10px] text-gray-400 ml-auto">
-        {visibleCount} nodes \u00b7 {edgeCount} edges
+        {Math.round(zoom * 100)}% · {visibleCount} nodes · {edgeCount} edges
       </span>
     </div>
   );

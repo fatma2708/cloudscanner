@@ -21,14 +21,15 @@ function edgePath(a: Point, b: Point): string {
   return `M ${a.x} ${a.y} Q ${mx + nx * curvature} ${my + ny * curvature} ${b.x} ${b.y}`;
 }
 
-export function ArchitectureEdge({ edge: _edge, a, b, isActive, isDimmed }: Props) {
+export function ArchitectureEdge({ a, b, isActive, isDimmed }: Props) {
   return (
     <path
       d={edgePath(a, b)}
       fill="none"
-      stroke="rgba(100,116,139,0.3)"
-      strokeWidth={isActive ? 1.8 : 0.8}
-      strokeOpacity={isDimmed ? 0.06 : isActive ? 1 : 0.3}
+      stroke="rgba(71,85,105,0.55)"
+      strokeWidth={isActive ? 2.4 : 1.2}
+      strokeOpacity={isDimmed ? 0.12 : isActive ? 1 : 0.7}
+      strokeLinecap="round"
       markerEnd={isActive ? "url(#arrow-active)" : "url(#arrow)"}
       style={{ transition: "stroke-opacity 0.15s, stroke-width 0.15s" }}
     />

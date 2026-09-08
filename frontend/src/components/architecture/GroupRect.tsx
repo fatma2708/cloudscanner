@@ -15,20 +15,20 @@ export function GroupRect({ group, bounds }: Props) {
         width={bounds.w}
         height={bounds.h}
         rx={12}
-        fill={`${group.color}06`}
+        fill={`${group.color}0d`}
         stroke={group.color}
-        strokeWidth={0.8}
-        strokeOpacity={0.2}
+        strokeWidth={1.25}
+        strokeOpacity={0.5}
         strokeDasharray="5 4"
       />
       <text
         x={bounds.x + 10}
         y={bounds.y + 14}
         style={{
-          fontSize: "10px",
-          fontWeight: 500,
+          fontSize: "11px",
+          fontWeight: 600,
           fill: group.color,
-          fillOpacity: 0.5,
+          fillOpacity: 0.9,
           paintOrder: "stroke",
           stroke: "white",
           strokeWidth: 3,

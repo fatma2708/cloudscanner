@@ -44,6 +44,7 @@ export default function LandingPage() {
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://github.com/owner/repo"
               required
+              aria-label="GitHub repository URL"
               className="flex-1 px-5 py-3.5 rounded-full bg-md-surface-container-lowest border border-md-outline-variant text-md-on-surface placeholder:text-md-on-surface-variant/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors text-sm"
             />
             <button

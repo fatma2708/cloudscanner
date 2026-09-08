@@ -232,7 +232,7 @@ _KIND_HANDLERS = {
     "efs": _efs,
     "lambda": _lambda_,
     "alb": _alb,
-    "elb": _alb,
+    "elb": _elb,
     "nat": _nat,
     "eip": _eip,
     "eks": _eks,
@@ -268,6 +268,9 @@ def estimate_resource_cost(resource: Resource) -> float:
     try:
         return round(handler(resource), 2)
     except Exception:
+        import logging
+
+        logging.exception("Pricing handler failed for %s", resource.id)
         return 0.0
 
 
@@ -276,7 +279,9 @@ def estimate_all(resources: list[Resource]) -> dict[str, float]:
 
     Data sources and non-billable resources are excluded from the result.
     """
-    return {res.id: estimate_resource_cost(res) for res in resources if not res.is_data and res.billable}
+    return {
+        res.id: estimate_resource_cost(res) for res in resources if not res.is_data and res.billable
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -285,23 +290,23 @@ def estimate_all(resources: list[Resource]) -> dict[str, float]:
 
 # Confidence levels for each kind based on how well we can estimate from static config
 _KIND_CONFIDENCE: dict[str, str] = {
-    "ec2": "high",          # instance_type -> catalog lookup is reliable
-    "rds": "high",          # instance_class -> catalog lookup
-    "ebs": "high",          # size * type per-GB is reliable
-    "s3": "medium",         # we assume default size_gb, no real data
-    "nat": "high",          # flat + known egress formula
-    "alb": "medium",        # flat fee + unknown egress volume
+    "ec2": "high",  # instance_type -> catalog lookup is reliable
+    "rds": "high",  # instance_class -> catalog lookup
+    "ebs": "high",  # size * type per-GB is reliable
+    "s3": "medium",  # we assume default size_gb, no real data
+    "nat": "high",  # flat + known egress formula
+    "alb": "medium",  # flat fee + unknown egress volume
     "elb": "medium",
-    "lambda": "low",        # invocations are pure guesses
-    "ecs": "medium",        # Fargate vcpu/memory is reliable, but we don't know runtime hours
-    "dynamodb": "low",      # capacity mode unknown, provisioned vs on-demand
+    "lambda": "low",  # invocations are pure guesses
+    "ecs": "medium",  # Fargate vcpu/memory is reliable, but we don't know runtime hours
+    "dynamodb": "low",  # capacity mode unknown, provisioned vs on-demand
     "elasticache": "medium",
-    "eks": "medium",        # cluster fee is flat, but data transfer is unknown
-    "cloudwatch": "high",   # flat alarm cost
-    "kms": "high",          # flat key cost
-    "waf": "medium",        # flat + rule-based scaling unknown
-    "route53": "low",       # query volume is a guess
-    "cloudfront": "low",    # data transfer varies wildly
+    "eks": "medium",  # cluster fee is flat, but data transfer is unknown
+    "cloudwatch": "high",  # flat alarm cost
+    "kms": "high",  # flat key cost
+    "waf": "medium",  # flat + rule-based scaling unknown
+    "route53": "low",  # query volume is a guess
+    "cloudfront": "low",  # data transfer varies wildly
     "sqs": "low",
     "sns": "low",
     "kinesis": "medium",
@@ -311,8 +316,8 @@ _KIND_CONFIDENCE: dict[str, str] = {
     "ssm": "high",
     "ecr": "medium",
     "efs": "medium",
-    "eip": "high",          # flat fee per month
-    "vpc": "high",          # VPCs are free
+    "eip": "high",  # flat fee per month
+    "vpc": "high",  # VPCs are free
 }
 
 # Cost classification: how the estimate was derived
@@ -397,7 +402,9 @@ def _usage_assumption_cost(resource: Resource) -> float:
     if kind == "lambda":
         return round(estimate_resource_cost(resource), 2)
     if kind == "route53":
-        return round(_num(resource, "queries_per_month", 1_000_000) * catalog.PER_UNIT["route53_query"], 2)
+        return round(
+            _num(resource, "queries_per_month", 1_000_000) * catalog.PER_UNIT["route53_query"], 2
+        )
     if kind == "cloudfront":
         return round(estimate_resource_cost(resource), 2)
     if kind == "apigateway":
@@ -424,15 +431,17 @@ def estimate_all_detailed(resources: list[Resource]) -> list[dict]:
         assumptions = _CONFIDENCE_NOTES.get(res.kind, "No assumptions documented.")
         if cost == 0.0 and confidence == "unknown":
             classification = "unknown"
-        results.append({
-            "resource_id": res.id,
-            "kind": res.kind,
-            "name": res.name,
-            "monthly_cost": round(cost, 2),
-            "known_cost": known,
-            "usage_cost": usage,
-            "confidence": confidence,
-            "cost_classification": classification,
-            "assumptions": assumptions,
-        })
+        results.append(
+            {
+                "resource_id": res.id,
+                "kind": res.kind,
+                "name": res.name,
+                "monthly_cost": round(cost, 2),
+                "known_cost": known,
+                "usage_cost": usage,
+                "confidence": confidence,
+                "cost_classification": classification,
+                "assumptions": assumptions,
+            }
+        )
     return results

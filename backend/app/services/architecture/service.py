@@ -27,28 +27,64 @@ GROUP_COLORS = {
 }
 
 
-_GRAPH_KINDS_TO_SKIP = frozenset({
-    "iam", "kms", "route53", "cloudfront", "waf", "acm",
-    "security_group", "nacl", "route_table", "route",
-    "subnet_group", "parameter_group",
-})
+_GRAPH_KINDS_TO_SKIP = frozenset(
+    {
+        "iam",
+        "kms",
+        "route53",
+        "cloudfront",
+        "waf",
+        "acm",
+        "security_group",
+        "nacl",
+        "route_table",
+        "route",
+        "subnet_group",
+        "parameter_group",
+    }
+)
 
 # Primary topology kinds — visually prominent
-_PRIMARY_KINDS = frozenset({
-    "vpc", "subnet", "igw", "nat", "eip",
-    "alb", "elb",
-    "ec2", "asg", "ecs", "eks", "lambda",
-    "rds", "elasticache", "dynamodb", "elasticsearch", "opensearch",
-    "s3", "efs",
-})
+_PRIMARY_KINDS = frozenset(
+    {
+        "vpc",
+        "subnet",
+        "igw",
+        "nat",
+        "eip",
+        "alb",
+        "elb",
+        "ec2",
+        "asg",
+        "ecs",
+        "eks",
+        "lambda",
+        "rds",
+        "elasticache",
+        "dynamodb",
+        "elasticsearch",
+        "opensearch",
+        "s3",
+        "efs",
+    }
+)
 
 # Supporting infrastructure kinds — lighter visual treatment
-_SUPPORTING_KINDS = frozenset({
-    "ecr", "cloudwatch", "events", "step_functions",
-    "sqs", "sns", "kinesis",
-    "apigateway", "launch_template",
-    "target_group", "listener",
-})
+_SUPPORTING_KINDS = frozenset(
+    {
+        "ecr",
+        "cloudwatch",
+        "events",
+        "step_functions",
+        "sqs",
+        "sns",
+        "kinesis",
+        "apigateway",
+        "launch_template",
+        "target_group",
+        "listener",
+    }
+)
 
 _SANITIZE_RE = re.compile(r"[^\w\s\-./()]")
 
@@ -65,6 +101,13 @@ def build_graph(config: TerraformConfig) -> dict:
     (IAM, security groups, route tables) that clutter the diagram without
     adding architectural value. Edges referencing skipped resources are
     still preserved so connectivity is visible.
+
+    Modules are represented explicitly:
+
+    * expanded local modules get a hub node connected to their inner resources
+    * unexpanded modules appear as a single node marked ``unexpanded`` —
+      their internals are unknown and are never invented
+    * module-to-module dependencies become edges between module nodes
     """
     nodes: list[dict] = []
     groups: dict[str, dict] = {}
@@ -91,20 +134,19 @@ def build_graph(config: TerraformConfig) -> dict:
                 "id": group_key,
                 "label": group_key,
                 "color": GROUP_COLORS.get(res.service, "#64748b"),
-                "kind": "network"
-                if res.kind in ("vpc", "subnet", "igw", "nat")
-                else res.service,
+                "kind": "network" if res.kind in ("vpc", "subnet", "igw", "nat") else res.service,
             },
         )
 
-        layer = "primary" if res.kind in _PRIMARY_KINDS else (
-            "supporting" if res.kind in _SUPPORTING_KINDS else "implementation"
+        layer = (
+            "primary"
+            if res.kind in _PRIMARY_KINDS
+            else ("supporting" if res.kind in _SUPPORTING_KINDS else "implementation")
         )
 
         cost = res.attributes.get("_monthly_cost", 0.0)
         cost_class = res.attributes.get("_cost_classification", "unknown")
         cost_conf = res.attributes.get("_cost_confidence", "unknown")
-        resource_address = f"{res.resource_type}.{res.name}"
 
         node = {
             "id": res.id,
@@ -112,7 +154,7 @@ def build_graph(config: TerraformConfig) -> dict:
             "displayName": _display_name(res),
             "name": res.name,
             "type": res.resource_type,
-            "resourceAddress": resource_address,
+            "resourceAddress": res.address,
             "category": res.service,
             "kind": res.kind,
             "service": res.service,
@@ -120,6 +162,7 @@ def build_graph(config: TerraformConfig) -> dict:
             "region": res.region,
             "status": "ok",
             "is_data": False,
+            "is_module": False,
             "layer": layer,
             "metrics": {
                 "monthly_cost": cost,
@@ -131,8 +174,94 @@ def build_graph(config: TerraformConfig) -> dict:
         nodes.append(node)
         node_ids.add(res.id)
 
+    # --- explicit module nodes -------------------------------------------
+    module_node_ids: dict[str, str] = {}
+    for module in config.modules:
+        node_id = f"module::{module.address}"
+        module_node_ids[module.address] = node_id
+
+        if module.expansion == "expanded":
+            display = f"{module.name} (module)"
+            status = "ok"
+            note = module.note
+        else:
+            display = f"{module.name} (module)"
+            status = "unexpanded"
+            note = module.note or "Module source not included in upload."
+
+        group_key = _sanitize_label("Modules")
+        groups.setdefault(
+            group_key,
+            {
+                "id": group_key,
+                "label": "Modules",
+                "color": "#0ea5e9",
+                "kind": "modules",
+            },
+        )
+
+        nodes.append(
+            {
+                "id": node_id,
+                "label": _sanitize_label(module.name),
+                "displayName": display,
+                "name": module.name,
+                "type": "module",
+                "resourceAddress": module.address,
+                "category": "module",
+                "kind": "module",
+                "service": "module",
+                "group": group_key,
+                "region": "global",
+                "status": status,
+                "is_data": False,
+                "is_module": True,
+                "layer": "primary",
+                "expansion": module.expansion,
+                "module_source": module.source,
+                "module_version": module.version,
+                "source_type": module.source_type,
+                "note": note,
+                "resource_count": module.resource_count,
+                "metrics": {
+                    "monthly_cost": 0.0,
+                    "cost_classification": "unknown",
+                    "cost_confidence": "unknown",
+                    "cost_status": module.cost_status,
+                },
+                "icon": "module",
+            }
+        )
+        node_ids.add(node_id)
+
     edges = config.graph_edges()
     edges = _infer_edges(config, edges)
+
+    # Edges from expanded module hubs to their direct child resources.
+    for module in config.modules:
+        if module.expansion != "expanded":
+            continue
+        hub_id = module_node_ids.get(module.address)
+        if not hub_id:
+            continue
+        for res in config.resources:
+            if res.is_data or res.module_address != module.address:
+                continue
+            if res.kind in _GRAPH_KINDS_TO_SKIP:
+                continue
+            edges.append({"source": hub_id, "target": res.id, "relationship": "contains"})
+
+    # Module-to-module dependency edges (e.g. module.eks -> module.vpc).
+    for source_addr, targets in config.module_dependencies().items():
+        source_id = module_node_ids.get(source_addr)
+        if not source_id:
+            continue
+        for target_addr in targets:
+            target_id = module_node_ids.get(target_addr)
+            if target_id:
+                edges.append(
+                    {"source": source_id, "target": target_id, "relationship": "dependency"}
+                )
 
     # Add relationship type to edges
     for edge in edges:
@@ -149,6 +278,7 @@ def build_graph(config: TerraformConfig) -> dict:
         "edges": edges,
         "groups": list(groups.values()),
         "topology_count": topology_count,
+        "modules": [m.to_dict() for m in config.modules],
     }
 
 
@@ -161,6 +291,7 @@ def _icon_for(res: Resource) -> str:
 def _display_name(res: Resource) -> str:
     """Return human-readable display name from registry."""
     from app.services.terraform.registry import classify
+
     kind_info = classify(res.resource_type)
     return kind_info.label
 
@@ -169,9 +300,16 @@ def _assign_groups(config: TerraformConfig) -> dict[str, str]:
     """Map each resource to a group label describing its network boundary."""
     group_of: dict[str, str] = {}
 
+    # Resources inside expanded modules group under their module path.
+    for res in config.resources:
+        if res.module_address:
+            group_of[res.id] = res.module_address
+
     # VPCs
     vpc_by_name: dict[str, str] = {}
     for res in config.resources:
+        if res.id in group_of:
+            continue
         if res.kind == "vpc":
             label = res.name if res.name != "main" else f"VPC ({res.name})"
             group_of[res.id] = label
@@ -180,6 +318,8 @@ def _assign_groups(config: TerraformConfig) -> dict[str, str]:
     # Subnets -> attach to their VPC, mark public/private
     subnet_group: dict[str, str] = {}
     for res in config.resources:
+        if res.id in group_of:
+            continue
         if res.kind == "subnet":
             vpc_refs = [r for r in res.references if r in vpc_by_name]
             vpc_label = (

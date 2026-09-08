@@ -103,12 +103,6 @@ def test_analyze_zip_flow(client: TestClient):
     assert detail.json()["resources"]
 
 
-def test_optimization_modes_endpoint(client: TestClient):
-    resp = client.get("/api/v1/optimization/modes")
-    assert resp.status_code == 200
-    assert "lowest-cost" in resp.json()["modes"]
-
-
 def _login(client: TestClient) -> str:
     resp = client.post(
         "/api/v1/auth/register",

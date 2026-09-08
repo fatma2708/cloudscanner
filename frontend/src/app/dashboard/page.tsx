@@ -1,12 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useAnalysis } from "@/lib/analysis-context";
 import { ErrorPanel } from "@/components/dashboard/states";
+import { CrimInlineChip } from "@/components/dashboard/crim";
+import { EvidenceCoverageBadge, unexpandedModuleCount } from "@/components/dashboard/evidence-coverage-badge";
 import { formatCurrency } from "@/lib/format";
 import { MaterialIcon } from "@/components/ui/material-icon";
 
-function GitHubInput({ onSubmit, busy }: { onSubmit: (url: string) => void; busy: boolean }) {
+function GitHubInput({
+  onSubmit,
+  onDemo,
+  busy,
+}: {
+  onSubmit: (url: string) => void;
+  onDemo: () => void;
+  busy: boolean;
+}) {
   const [url, setUrl] = useState("");
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
@@ -31,6 +41,7 @@ function GitHubInput({ onSubmit, busy }: { onSubmit: (url: string) => void; busy
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://github.com/owner/repo"
           required
+          aria-label="GitHub repository URL"
           className="flex-1 px-5 py-3 rounded-full bg-md-surface-container-lowest border border-md-outline-variant text-md-on-surface placeholder:text-md-on-surface-variant/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors text-sm"
         />
         <button
@@ -46,6 +57,14 @@ function GitHubInput({ onSubmit, busy }: { onSubmit: (url: string) => void; busy
           Analyze
         </button>
       </form>
+      <button
+        type="button"
+        onClick={onDemo}
+        disabled={busy}
+        className="text-sm font-medium text-primary hover:underline disabled:opacity-50"
+      >
+        Or explore the demo project
+      </button>
     </div>
   );
 }
@@ -142,13 +161,16 @@ function AnalysisLimitations() {
 }
 
 export default function OverviewPage() {
-  const { data, error, refreshing, refresh, repoUrl, analyzeGithub, mode } = useAnalysis();
+  const { data, error, refreshing, refresh, repoUrl, analyzeGithub, analyzeDemo, mode } = useAnalysis();
 
   if (error && !data) return <ErrorPanel message={error} />;
   if (refreshing && !data) return <LoadingState url={repoUrl ?? ""} />;
-  if (!repoUrl || !data) return <GitHubInput onSubmit={analyzeGithub} busy={refreshing} />;
+  if (!repoUrl || !data) {
+    return <GitHubInput onSubmit={analyzeGithub} onDemo={analyzeDemo} busy={refreshing} />;
+  }
 
   const { summary, recommendations, scores, costs } = data;
+  const unexpandedModules = unexpandedModuleCount(scores, summary);
   const criticalCount = recommendations.filter((r) => r.severity === "critical" || r.severity === "high").length;
   const topFixes = recommendations.slice(0, 3);
   const evidenceDimensions = scores.evidence_dimensions ?? [];
@@ -175,7 +197,8 @@ export default function OverviewPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Assessed Score" value={scores.overall !== null ? `${scores.overall} / 100` : "N/A"} icon="grade" />
         <StatCard label="Monthly Cost" value={formatCurrency(summary.current_monthly)} icon="payments"
-          sub={costs.confidence.level === "low" ? "Runtime usage data unavailable" : undefined} />
+          sub={costs.confidence.level === "low" ? "Runtime usage data unavailable" : undefined}
+          badge={<EvidenceCoverageBadge coveragePct={scores.evidence_coverage_pct} unexpandedModules={unexpandedModules} />} />
         <StatCard
           label="Savings"
           value={summary.monthly_savings > 0 ? formatCurrency(summary.monthly_savings) : "—"}
@@ -208,6 +231,7 @@ export default function OverviewPage() {
             }`}>
               Evidence Coverage: {scores.evidence_coverage_pct.toFixed(0)}%
             </span>
+            <EvidenceCoverageBadge coveragePct={scores.evidence_coverage_pct} unexpandedModules={unexpandedModules} />
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
               costs.confidence.level === "high" ? "bg-emerald-100 text-emerald-700" :
               costs.confidence.level === "medium" ? "bg-amber-100 text-amber-700" :
@@ -309,6 +333,15 @@ export default function OverviewPage() {
                   <div className="min-w-0">
                     <h3 className="text-sm font-medium text-md-on-surface">{rec.title}</h3>
                     <p className="text-xs text-md-on-surface-variant line-clamp-1 mt-0.5">{rec.description}</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                      <span className="text-[10px] text-md-on-surface-variant/80">Detected by CloudPilot rules</span>
+                      <CrimInlineChip
+                        classification={rec.ml_classification}
+                        unavailable={data.crim?.ml_unavailable}
+                        alwaysShowUncertain
+                        showModel
+                      />
+                    </div>
                   </div>
                   {rec.savings_monthly > 0 && (
                     <span className="text-xs font-medium text-primary whitespace-nowrap">
@@ -332,13 +365,14 @@ export default function OverviewPage() {
   );
 }
 
-function StatCard({ label, value, sub, icon, accent, alert }: {
+function StatCard({ label, value, sub, icon, accent, alert, badge }: {
   label: string;
   value: string;
   sub?: string;
   icon: string;
   accent?: boolean;
   alert?: boolean;
+  badge?: ReactNode;
 }) {
   return (
     <div className={`p-4 rounded-xl border border-md-outline-variant ${alert ? "bg-md-error-container/10 border-md-error/20" : "bg-md-surface-container-low"}`}>
@@ -350,6 +384,7 @@ function StatCard({ label, value, sub, icon, accent, alert }: {
         <span className={`text-xl font-bold ${accent ? "text-primary" : alert ? "text-md-error" : "text-md-on-surface"}`}>{value}</span>
       </div>
       {sub && <p className="text-[10px] text-md-on-surface-variant mt-0.5">{sub}</p>}
+      {badge && <div className="mt-2">{badge}</div>}
     </div>
   );
 }

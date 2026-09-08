@@ -1,0 +1,15 @@
+.venv*/
+__pycache__/
+*.egg-info/
+*.pyc
+cloudpilot.db
+tests/
+.git/
+.github/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+storage/
+uploads/

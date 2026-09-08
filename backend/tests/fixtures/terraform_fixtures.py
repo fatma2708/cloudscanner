@@ -216,7 +216,6 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 """,
-
     "variables.tf": """
 variable "environment" {
   type    = string

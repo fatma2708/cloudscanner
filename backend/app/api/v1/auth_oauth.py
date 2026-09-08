@@ -79,7 +79,7 @@ async def exchange_github(code: str) -> dict:
 
 def _demo_profile(provider: str, code: str) -> dict:
     """Deterministic demo identity used when OAuth is not configured."""
-    digest = hashlib.md5(f"{provider}:{code}".encode()).hexdigest()[:12]
+    digest = hashlib.sha256(f"{provider}:{code}".encode()).hexdigest()[:12]
     return {
         "email": f"user-{digest}@demo.cloudpilot.ai",
         "name": "Demo User",

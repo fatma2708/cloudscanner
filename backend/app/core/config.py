@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./cloudpilot.db"
 
     # --- Auth ---
-    jwt_secret: str = "dev-only-secret-change-me"
+    jwt_secret: str = "dev-only-secret-change-me-before-production-32b"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7
     google_client_id: str = ""
@@ -58,11 +58,33 @@ class Settings(BaseSettings):
     hf_model: str = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
     hf_base_url: str = "https://router.huggingface.co/v1"
 
+    # --- CRIM (advisory ML classification layer) ---
+    # Path to the frozen, validated CRIM-v4.2 joblib artifact. Relative to the
+    # backend working directory (the repository root), never user-controlled.
+    crim_model_path: str = "models/crim_v4_2/cloudpilot_risk_intelligence_crim_v4_2.joblib"
+    # Probabilistic threshold below which the ML layer abstains instead of
+    # forcing a category. Matches the CRIM-v4.2 validation recommendation.
+    crim_confidence_threshold: float = 0.70
+    crim_model_name: str = "CRIM-v4.2"
+    crim_model_version: str = "v4.2"
+
     @field_validator("cors_origins")
     @classmethod
     def parse_cors_origins(cls, value: str) -> list[str]:
         """Split the comma separated CORS origins into a list."""
         return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug(cls, value: bool | str) -> bool | str:
+        """Accept conventional deployment labels used by hosting environments."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production"}:
+                return False
+            if normalized in {"development", "debug"}:
+                return True
+        return value
 
     @property
     def has_openai(self) -> bool:

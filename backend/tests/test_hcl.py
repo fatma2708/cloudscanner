@@ -1,6 +1,8 @@
 """HCL parser unit tests."""
 
-from app.services.terraform.hcl import parse_hcl
+import pytest
+
+from app.services.terraform.hcl import ParseError, parse_hcl
 
 SAMPLE = """
 # comment
@@ -64,6 +66,11 @@ def test_parse_heredoc():
 def test_parse_malformed_does_not_raise():
     blocks = parse_hcl("resource aws_instance { this is ( broken ]}")
     assert isinstance(blocks, list)
+
+
+def test_strict_parse_rejects_unterminated_block_without_spinning():
+    with pytest.raises(ParseError):
+        parse_hcl('resource "aws_instance" "broken"', strict=True)
 
 
 def test_interpolation_preserved():

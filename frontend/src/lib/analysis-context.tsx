@@ -17,28 +17,20 @@ interface AnalysisContextValue {
   loading: boolean;
   error: string | null;
   mode: string;
-  setMode: (mode: string) => void;
   refresh: () => Promise<void>;
   refreshing: boolean;
   repoUrl: string | null;
   analyzeGithub: (url: string) => Promise<void>;
+  analyzeDemo: () => Promise<void>;
 }
 
 const AnalysisContext = createContext<AnalysisContextValue | null>(null);
 
-export const OPTIMIZATION_MODES: Record<string, { label: string; description: string }> = {
-  balanced: { label: "Balanced", description: "The best overall mix of cost, reliability and sustainability." },
-  "lowest-cost": { label: "Lowest Cost", description: "Aggressively cut spend, even if it trades some reliability." },
-  "startup-budget": { label: "Startup Budget", description: "Bare-metal savings with the fewest moving parts." },
-  "lowest-carbon": { label: "Lowest Carbon", description: "Minimize embodied and operational emissions." },
-  "lowest-latency": { label: "Lowest Latency", description: "Prefer the fastest paths and nearest regions." },
-  reliability: { label: "Reliability", description: "Maximum resilience, redundancy and failover." },
-  security: { label: "Security", description: "Hardening-first posture for sensitive workloads." },
-};
-
 function fetchAnalysis(url: string, mode: string) {
   return api.analyzeGithub(url, mode);
 }
+
+const DEMO_LABEL = "Demo project";
 
 function getInitialUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -51,7 +43,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(!!savedUrl);
-  const [mode, setMode] = useState("balanced");
+  const [mode] = useState("balanced");
 
   const analyzeGithub = useCallback(async (url: string) => {
     setRepoUrl(url);
@@ -60,16 +52,35 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     setError(null);
     setRefreshing(true);
     try {
-      const result = await fetchAnalysis(url, "balanced");
+      const result = await fetchAnalysis(url, mode);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to analyze repository");
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [mode]);
+
+  const analyzeDemo = useCallback(async () => {
+    setRepoUrl(DEMO_LABEL);
+    sessionStorage.removeItem("cloudpilot_github_url");
+    setData(null);
+    setError(null);
+    setRefreshing(true);
+    try {
+      setData(await api.analyze(mode));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load the demo project");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [mode]);
 
   const refresh = useCallback(async () => {
+    if (repoUrl === DEMO_LABEL) {
+      await analyzeDemo();
+      return;
+    }
     const currentUrl = sessionStorage.getItem("cloudpilot_github_url");
     if (!currentUrl) return;
     setRefreshing(true);
@@ -82,7 +93,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     } finally {
       setRefreshing(false);
     }
-  }, [mode]);
+  }, [analyzeDemo, mode, repoUrl]);
 
   useEffect(() => {
     const url = sessionStorage.getItem("cloudpilot_github_url");
@@ -103,19 +114,19 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
   const loading = data === null && error === null;
 
-  const value = useMemo(
+const value = useMemo(
     () => ({
       data,
       loading,
       error,
       mode,
-      setMode,
       refresh,
       refreshing,
       repoUrl,
       analyzeGithub,
+      analyzeDemo,
     }),
-    [data, loading, error, mode, refresh, refreshing, repoUrl, analyzeGithub],
+    [data, loading, error, mode, refresh, refreshing, repoUrl, analyzeGithub, analyzeDemo],
   );
 
   return <AnalysisContext.Provider value={value}>{children}</AnalysisContext.Provider>;

@@ -35,20 +35,27 @@ def _config_from_fixture(fixture: dict[str, str]) -> object:
 # ECS-only: no EC2 false positives
 # ---------------------------------------------------------------------------
 
+
 class TestECSOnlyNoFalsePositives:
     """ECS Fargate architecture should not trigger EC2/ASG/ALB health check findings."""
 
     def test_no_asg_recommendation(self):
         config = _config_from_fixture(ECS_ONLY)
         recs = run_recommendations(config)
-        asg_recs = [r for r in recs if "autoscal" in r.title.lower() or "auto scaling" in r.title.lower()]
-        assert len(asg_recs) == 0, f"False positive ASG recommendation: {[r.title for r in asg_recs]}"
+        asg_recs = [
+            r for r in recs if "autoscal" in r.title.lower() or "auto scaling" in r.title.lower()
+        ]
+        assert len(asg_recs) == 0, (
+            f"False positive ASG recommendation: {[r.title for r in asg_recs]}"
+        )
 
     def test_no_single_instance_recommendation(self):
         config = _config_from_fixture(ECS_ONLY)
         recs = run_recommendations(config)
         single_recs = [r for r in recs if "single instance" in r.title.lower()]
-        assert len(single_recs) == 0, f"False positive single instance: {[r.title for r in single_recs]}"
+        assert len(single_recs) == 0, (
+            f"False positive single instance: {[r.title for r in single_recs]}"
+        )
 
     def test_s3_encryption_not_flagged(self):
         config = _config_from_fixture(ECS_ONLY)
@@ -74,7 +81,9 @@ class TestECSOnlyNoFalsePositives:
         recs = run_recommendations(config)
         for rec in recs:
             assert hasattr(rec, "confidence"), f"Recommendation {rec.key} missing confidence"
-            assert rec.confidence in ("high", "medium", "low", "unknown"), f"Invalid confidence: {rec.confidence}"
+            assert rec.confidence in ("high", "medium", "low", "unknown"), (
+                f"Invalid confidence: {rec.confidence}"
+            )
 
     def test_rec_has_evidence_field(self):
         config = _config_from_fixture(ECS_ONLY)
@@ -94,8 +103,8 @@ class TestECSOnlyNoFalsePositives:
 # S3 security checks
 # ---------------------------------------------------------------------------
 
-class TestS3SecurityChecks:
 
+class TestS3SecurityChecks:
     def test_secure_s3_no_findings(self):
         config = _config_from_fixture(SECURE_S3)
         recs = run_recommendations(config)
@@ -116,8 +125,8 @@ class TestS3SecurityChecks:
 # Security group checks
 # ---------------------------------------------------------------------------
 
-class TestSecurityGroupChecks:
 
+class TestSecurityGroupChecks:
     def test_open_sg_flagged(self):
         config = _config_from_fixture(INSECURE_SG)
         recs = run_recommendations(config)
@@ -129,8 +138,8 @@ class TestSecurityGroupChecks:
 # Data sources only
 # ---------------------------------------------------------------------------
 
-class TestDataSourcesOnly:
 
+class TestDataSourcesOnly:
     def test_no_recommendations_for_data_only(self):
         config = _config_from_fixture(DATA_SOURCES_ONLY)
         for res in config.resources:
@@ -143,18 +152,22 @@ class TestDataSourcesOnly:
 # EC2 / ASG combinations
 # ---------------------------------------------------------------------------
 
-class TestEC2ASGCombinations:
 
+class TestEC2ASGCombinations:
     def test_standalone_ec2_gets_asg_rec(self):
         config = _config_from_fixture(STANDALONE_EC2)
         recs = run_recommendations(config)
-        asg_recs = [r for r in recs if "autoscal" in r.title.lower() or "auto scaling" in r.title.lower()]
+        asg_recs = [
+            r for r in recs if "autoscal" in r.title.lower() or "auto scaling" in r.title.lower()
+        ]
         assert len(asg_recs) >= 1, "Standalone EC2 should get ASG recommendation"
 
     def test_ec2_with_asg_no_asg_rec(self):
         config = _config_from_fixture(EC2_WITH_ASG)
         recs = run_recommendations(config)
-        asg_recs = [r for r in recs if "autoscal" in r.title.lower() or "auto scaling" in r.title.lower()]
+        asg_recs = [
+            r for r in recs if "autoscal" in r.title.lower() or "auto scaling" in r.title.lower()
+        ]
         assert len(asg_recs) == 0, f"False positive ASG rec: {[r.title for r in asg_recs]}"
 
 
@@ -162,8 +175,8 @@ class TestEC2ASGCombinations:
 # ALB health check combinations
 # ---------------------------------------------------------------------------
 
-class TestALBHealthCheck:
 
+class TestALBHealthCheck:
     def test_alb_with_hc_no_finding(self):
         config = _config_from_fixture(ALB_WITH_HC)
         recs = run_recommendations(config)
@@ -181,14 +194,16 @@ class TestALBHealthCheck:
 # Scoring
 # ---------------------------------------------------------------------------
 
-class TestScoring:
 
+class TestScoring:
     def test_ecs_architecture_high_score(self):
         config = _config_from_fixture(ECS_ONLY)
         recs = run_recommendations(config)
         scores = compute_scores(config, recs)
         assert scores["overall"] >= 65, f"ECS architecture score too low: {scores['overall']}"
-        assert scores["grade"] in ("A+", "A", "A-", "B+", "B", "B-", "C+", "C"), f"Grade too low: {scores['grade']}"
+        assert scores["grade"] in ("A+", "A", "A-", "B+", "B", "B-", "C+", "C"), (
+            f"Grade too low: {scores['grade']}"
+        )
 
     def test_scores_have_deductions(self):
         config = _config_from_fixture(ECS_ONLY)

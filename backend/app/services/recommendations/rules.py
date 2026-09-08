@@ -39,16 +39,19 @@ def _cidr_blocks(rule_attrs) -> list[str]:
     return blocks
 
 
-def _sg_open_ports(resource: Resource) -> list[tuple[str, str]]:
-    """Return [(kind, port_desc)] of ingress rules that expose dangerous ports to 0.0.0.0/0.
+def _sg_open_ports(resource: Resource) -> list[tuple[str, str, dict]]:
+    """Return [(kind, port_desc, rule)] of ingress rules exposing dangerous ports to 0.0.0.0/0.
 
     Detects:
     - SSH/RDP (22/3389)
     - Database ports (5432/3306/1433)
     - Datastore ports (6379/27017)
     - All-ports (protocol=-1, or from_port=0/to_port=65535)
+
+    The returned ``rule`` is the offending ingress dict so callers can build a
+    scoped remediation (restrict the same port/protocol, not unrelated resources).
     """
-    dangerous: list[tuple[str, str]] = []
+    dangerous: list[tuple[str, str, dict]] = []
     for rule in resource.attributes.get("ingress", []) or []:
         if not isinstance(rule, dict):
             continue
@@ -74,32 +77,32 @@ def _sg_open_ports(resource: Resource) -> list[tuple[str, str]]:
 
         # Protocol -1 or "all" = all traffic
         if protocol in ("-1", "all"):
-            dangerous.append(("all-ports", "*"))
+            dangerous.append(("all-ports", "*", rule))
             continue
 
         # Full port range (0-65535) or equivalent
         if fp == 0 and tp == 65535:
-            dangerous.append(("all-ports", "0-65535"))
+            dangerous.append(("all-ports", "0-65535", rule))
             continue
         if fp is None and tp is None:
-            dangerous.append(("all-ports", "*"))
+            dangerous.append(("all-ports", "*", rule))
             continue
 
         # Individual dangerous ports
         if protocol in ("tcp", "tcp udp", ""):
             if fp in (22, 3389) or tp in (22, 3389):
-                dangerous.append(("ssh/rdp", str(fp or tp)))
+                dangerous.append(("ssh/rdp", str(fp or tp), rule))
             elif fp in (5432, 3306, 1433) or tp in (5432, 3306, 1433):
-                dangerous.append(("database", str(fp or tp)))
+                dangerous.append(("database", str(fp or tp), rule))
             elif fp in (6379, 27017) or tp in (6379, 27017):
-                dangerous.append(("datastore", str(fp or tp)))
+                dangerous.append(("datastore", str(fp or tp), rule))
             # Also catch ranges that include dangerous ports
             elif fp is not None and tp is not None and fp <= 22 <= tp:
-                dangerous.append(("ssh/rdp", f"{fp}-{tp}"))
+                dangerous.append(("ssh/rdp", f"{fp}-{tp}", rule))
             elif fp is not None and tp is not None and fp <= 5432 <= tp:
-                dangerous.append(("database", f"{fp}-{tp}"))
+                dangerous.append(("database", f"{fp}-{tp}", rule))
             elif fp is not None and tp is not None and fp <= 6379 <= tp:
-                dangerous.append(("datastore", f"{fp}-{tp}"))
+                dangerous.append(("datastore", f"{fp}-{tp}", rule))
 
     return dangerous
 
@@ -120,10 +123,9 @@ def _has_health_check(config: TerraformConfig) -> bool:
 def _instances(config: TerraformConfig) -> list[Resource]:
     """Return only actual aws_instance resources (not ECS, not data sources)."""
     return [
-        r for r in config.resources
-        if r.kind == "ec2"
-        and r.resource_type == "aws_instance"
-        and not r.is_data
+        r
+        for r in config.resources
+        if r.kind == "ec2" and r.resource_type == "aws_instance" and not r.is_data
     ]
 
 
@@ -206,7 +208,7 @@ def rule_nat_gateway(config: TerraformConfig) -> list[Recommendation]:
             confidence = "high"
             title = "Replace NAT Gateway with a managed alternative for a small workload"
             description = (
-                f"A single NAT gateway costing $36+/mo appears to serve a small "
+                "A single NAT gateway costing $36+/mo appears to serve a small "
                 "workload. Consider VPC endpoints for the services you use, or a "
                 "NAT instance on a small spot VM."
             )
@@ -242,7 +244,7 @@ def rule_nat_gateway(config: TerraformConfig) -> list[Recommendation]:
                 reliability_impact="VPC endpoints are highly available and redundant.",
                 security_impact="Private traffic stays inside the VPC — improved.",
                 evidence=[
-                    f"Found 1 NAT gateway at ~$36.72/mo + $0.045/GB processed",
+                    "Found 1 NAT gateway at ~$36.72/mo + $0.045/GB processed",
                     "Workload size could not be fully determined from Terraform configuration alone",
                     "Confidence=low because additional workload/traffic information is required",
                 ],
@@ -322,7 +324,7 @@ def rule_spot_instances(config: TerraformConfig) -> list[Recommendation]:
             or res.attributes.get("iam_instance_profile") is None
         )
         if stateful and res.attributes.get("root_block_device") is None:
-            pass
+            continue
         savings = spec.monthly * 0.7
         recs.append(
             Recommendation(
@@ -508,13 +510,41 @@ def rule_sg_open_world(config: TerraformConfig) -> list[Recommendation]:
         open_ports = _sg_open_ports(res)
         if not open_ports:
             continue
-        for kind, _port in open_ports:
+        for kind, _port, rule in open_ports:
             desc = {
                 "ssh/rdp": "SSH/RDP (22/3389)",
                 "database": "a database port (5432/3306/1433)",
                 "datastore": "a datastore port (6379/27017)",
                 "all-ports": "ALL ports",
             }[kind]
+
+            # Build a scoped remediation: restrict the SAME rule that exposes
+            # the dangerous port to 0.0.0.0/0. The generated block narrows the
+            # ingress CIDR to a private bastion range instead of the world.
+            port_desc = rule.get("from_port", rule.get("to_port", 0))
+            to_port = rule.get("to_port", rule.get("from_port", port_desc))
+            protocol = rule.get("protocol") or "tcp"
+            if str(protocol).lower() in ("-1", "all"):
+                protocol = -1
+            use_ipv6 = bool(rule.get("ipv6_cidr_blocks"))
+            restricted_cidr = "fd00::/8" if use_ipv6 else "10.0.0.0/8"
+            cidr_key = "ipv6_cidr_blocks" if use_ipv6 else "cidr_blocks"
+            generated_code = {
+                "aws_security_group_rule": {
+                    "name": f"{res.name}_restrict_{kind.replace('/', '_')}",
+                    "config": {
+                        "type": "ingress",
+                        "security_group_id": f"${{aws_security_group.{res.name}.id}}",
+                        "from_port": int(port_desc)
+                        if str(port_desc).lstrip("-").isdigit()
+                        else port_desc,
+                        "to_port": int(to_port) if str(to_port).lstrip("-").isdigit() else to_port,
+                        "protocol": protocol,
+                        cidr_key: [restricted_cidr],
+                    },
+                }
+            }
+
             recs.append(
                 Recommendation(
                     key="sg-open-world",
@@ -550,6 +580,7 @@ def rule_sg_open_world(config: TerraformConfig) -> list[Recommendation]:
                         "Rotate credentials in case of prior exposure.",
                     ],
                     modes={"balanced", "enterprise", "startup-budget", "max-availability"},
+                    generated_code=generated_code,
                 )
             )
     return recs
@@ -572,7 +603,12 @@ def _sg_overlap_rules(resource: Resource) -> list[tuple[str, str]]:
         cidr = rule.get("cidr_blocks") or rule.get("ipv6_cidr_blocks") or []
         if isinstance(cidr, str):
             cidr = [cidr]
-        return (proto, int(fp) if fp is not None else -1, int(tp) if tp is not None else -1, tuple(sorted(cidr)))
+        return (
+            proto,
+            int(fp) if fp is not None else -1,
+            int(tp) if tp is not None else -1,
+            tuple(sorted(cidr)),
+        )
 
     seen: dict[tuple, int] = {}
     for i, rule in enumerate(ingress):
@@ -622,10 +658,7 @@ def rule_sg_overlaps(config: TerraformConfig) -> list[Recommendation]:
                 security_impact="Cleaner SGs are easier to audit and less likely to have stale access.",
                 evidence=[
                     f"Security group {res.name} has {len(overlaps)} overlapping/duplicate ingress rules",
-                    *[
-                        f"Rule #{idx}: {reason}"
-                        for idx, reason in overlaps[:5]
-                    ],
+                    *[f"Rule #{idx}: {reason}" for idx, reason in overlaps[:5]],
                 ],
                 implementation=[
                     "Audit each rule's purpose; remove exact duplicates.",
@@ -737,10 +770,7 @@ def rule_single_ec2_asg(config: TerraformConfig) -> list[Recommendation]:
         return []
 
     # Only check for actual ASG resources
-    asg_count = len([
-        r for r in config.resources
-        if r.kind == "asg" and not r.is_data
-    ])
+    asg_count = len([r for r in config.resources if r.kind == "asg" and not r.is_data])
 
     # Filter to instances not referenced by launch templates/ASGs
     standalone = [r for r in instances if r.id not in _referenced_asg_instances(config)]
@@ -1094,6 +1124,10 @@ def rule_lambda_memory(config: TerraformConfig) -> list[Recommendation]:
 
 def rule_observability(config: TerraformConfig) -> list[Recommendation]:
     recs: list[Recommendation] = []
+    # Absence of alarms cannot be established when unexpanded modules may
+    # contain them — never claim a gap we did not inspect.
+    if config.has_unexpanded_modules:
+        return recs
     alarms = [r for r in config.resources if r.kind == "cloudwatch" and not r.is_data]
     has_instances = bool(_instances(config))
     if has_instances and not alarms:
@@ -1181,12 +1215,12 @@ def rule_missing_tags(config: TerraformConfig) -> list[Recommendation]:
     return [
         Recommendation(
             key="missing-tags",
-                title="Add cost-allocation tags to your resources",
-                description=(
-                    f"{len(untagged)} billable resources have no ``tags`` block in their "
-                    "Terraform configuration. Without tags, Cost Explorer cannot segment "
-                    "spend by team/project/environment."
-                ),
+            title="Add cost-allocation tags to your resources",
+            description=(
+                f"{len(untagged)} billable resources have no ``tags`` block in their "
+                "Terraform configuration. Without tags, Cost Explorer cannot segment "
+                "spend by team/project/environment."
+            ),
             severity="low",
             category="cost",
             target=[r.id for r in untagged[:5]],
@@ -1224,12 +1258,12 @@ def rule_compliance_retention(config: TerraformConfig) -> list[Recommendation]:
     return [
         Recommendation(
             key="log-retention",
-                title="Set retention on CloudWatch Log Groups",
-                description=(
-                    f"{len(log_groups)} log group(s) do not declare ``retention_in_days``. "
-                    "AWS default is to keep logs forever, silently growing your bill and "
-                    "expanding compliance scope."
-                ),
+            title="Set retention on CloudWatch Log Groups",
+            description=(
+                f"{len(log_groups)} log group(s) do not declare ``retention_in_days``. "
+                "AWS default is to keep logs forever, silently growing your bill and "
+                "expanding compliance scope."
+            ),
             severity="medium",
             category="compliance",
             target=[r.id for r in log_groups],
@@ -1238,7 +1272,7 @@ def rule_compliance_retention(config: TerraformConfig) -> list[Recommendation]:
             difficulty="easy",
             confidence="high",
             improvement="Predictable log storage cost with policy-aligned retention.",
-                    why="AWS default is to keep logs forever, growing storage cost indefinitely.",
+            why="AWS default is to keep logs forever, growing storage cost indefinitely.",
             impact="None; old logs expire automatically.",
             cost_saved="~$2/mo typical for small fleets.",
             performance_impact="None.",
@@ -1252,7 +1286,7 @@ def rule_compliance_retention(config: TerraformConfig) -> list[Recommendation]:
                 "Set ``retention_in_days = 30`` (dev) / 90–365 (prod).",
                 "Add an S3 export policy for logs you must archive.",
             ],
-            modes={"enterprise", "balanced", "compliance"},
+            modes={"enterprise", "balanced"},
         )
     ]
 
@@ -1305,7 +1339,11 @@ def rule_ecs_eks_scaling(config: TerraformConfig) -> list[Recommendation]:
 def rule_elasticache(config: TerraformConfig) -> list[Recommendation]:
     recs: list[Recommendation] = []
     for res in config.resources:
-        if res.kind == "elasticache" and "replication_group" not in res.resource_type and not res.is_data:
+        if (
+            res.kind == "elasticache"
+            and "replication_group" not in res.resource_type
+            and not res.is_data
+        ):
             recs.append(
                 Recommendation(
                     key="elasticache-ha",
@@ -1358,7 +1396,10 @@ def rule_s3_encryption(config: TerraformConfig) -> list[Recommendation]:
     # Collect bucket names that have a separate encryption config resource
     encrypted_buckets: set[str] = set()
     for res in config.resources:
-        if res.resource_type == "aws_s3_bucket_server_side_encryption_configuration" and not res.is_data:
+        if (
+            res.resource_type == "aws_s3_bucket_server_side_encryption_configuration"
+            and not res.is_data
+        ):
             # The name of this resource matches the bucket name
             encrypted_buckets.add(res.name)
 
@@ -1483,19 +1524,22 @@ def rule_no_route53(config: TerraformConfig) -> list[Recommendation]:
     instances = _instances(config)
     if not instances:
         return []
+    # DNS/CDN may be declared inside unexpanded modules — absence unproven.
+    if config.has_unexpanded_modules:
+        return []
     has_dns = any(r.kind in ("route53", "cloudfront") for r in config.resources if not r.is_data)
     if has_dns:
         return []
     return [
         Recommendation(
             key="no-dns",
-                title="Route public traffic through Route53 + CloudFront",
-                description=(
-                    "The Terraform configuration does not declare Route53 records or "
-                    "CloudFront distributions for your compute endpoints. Direct access "
-                    "bypasses caching, WAF and HTTP/2 + connection reuse, and makes "
-                    "blue/green cutovers harder."
-                ),
+            title="Route public traffic through Route53 + CloudFront",
+            description=(
+                "The Terraform configuration does not declare Route53 records or "
+                "CloudFront distributions for your compute endpoints. Direct access "
+                "bypasses caching, WAF and HTTP/2 + connection reuse, and makes "
+                "blue/green cutovers harder."
+            ),
             severity="low",
             category="networking",
             target=[r.id for r in instances],

@@ -8,7 +8,7 @@ help:
 	@echo "  make dev-frontend      Run Next.js dev server"
 	@echo "  make test              Run backend test suite"
 	@echo "  make lint              Run ruff + eslint"
-	@echo "  make format            Run black/isort formatting"
+	@echo "  make format            Run ruff formatting"
 	@echo "  make seed              Seed demo project data"
 	@echo "  make up                Start full stack via docker-compose"
 	@echo "  make down              Stop docker-compose stack"
@@ -45,3 +45,6 @@ up:
 
 down:
 	docker compose down
+
+migrate:
+	cd backend && .venv/bin/alembic upgrade head

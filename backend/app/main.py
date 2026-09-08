@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,15 +12,30 @@ from app import __version__
 from app.api.router import router
 from app.core.config import get_settings
 from app.core.database import init_db
+from app.services.risk_intelligence.service import get_risk_intelligence_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create tables on startup for zero-config local runs."""
+    logger = logging.getLogger("main")
     try:
         init_db()
-    except Exception:  # pragma: no cover - never block startup on DB issues
-        pass
+    except Exception:
+        logger.exception("Failed to initialize database on startup")
+    try:
+        # Fail loudly if the trusted CRIM-v4.2 artifact is missing/incompatible.
+        # The risk endpoint returns 503 when unavailable; the rest of the API
+        # (including Checkov-backed flows) keeps working independently.
+        service = get_risk_intelligence_service()
+        service.ensure_loaded()
+        logger.info(
+            "CRIM-v4.2 model loaded: classes=%s threshold=%.2f", service.classes, service.threshold
+        )
+    except Exception:
+        logger.exception(
+            "CRIM-v4.2 risk intelligence model unavailable; POST /risk/classify returns 503"
+        )
     yield
 
 

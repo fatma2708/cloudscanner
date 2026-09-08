@@ -12,6 +12,7 @@ Validation pipeline:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -145,26 +146,52 @@ def render_optimized_project(blocks: list[dict]) -> str:
 
 # Valid top-level Terraform block types
 _VALID_BLOCK_TYPES = {
-    "resource", "data", "variable", "output", "locals",
-    "module", "provider", "terraform", "moved", "import",
+    "resource",
+    "data",
+    "variable",
+    "output",
+    "locals",
+    "module",
+    "provider",
+    "terraform",
+    "moved",
+    "import",
 }
 
 # Known AWS provider resource types (subset — covers the rules engine output)
 _KNOWN_AWS_RESOURCE_TYPES = {
-    "aws_instance", "aws_launch_template", "aws_autoscaling_group",
-    "aws_ebs_volume", "aws_s3_bucket", "aws_s3_bucket_server_side_encryption_configuration",
-    "aws_s3_bucket_versioning", "aws_nat_gateway", "aws_eip",
-    "aws_db_instance", "aws_elasticache_cluster", "aws_elasticache_replication_group",
-    "aws_cloudwatch_log_group", "aws_cloudwatch_metric_alarm",
-    "aws_sns_topic", "aws_sqs_queue", "aws_lambda_function",
-    "aws_iam_role", "aws_iam_policy", "aws_security_group",
-    "aws_vpc", "aws_subnet", "aws_route_table",
-    "aws_lb", "aws_lb_target_group", "aws_lb_listener",
-    "aws_ecs_service", "aws_ecs_task_definition", "aws_ecs_cluster",
+    "aws_instance",
+    "aws_launch_template",
+    "aws_autoscaling_group",
+    "aws_ebs_volume",
+    "aws_s3_bucket",
+    "aws_s3_bucket_server_side_encryption_configuration",
+    "aws_s3_bucket_versioning",
+    "aws_nat_gateway",
+    "aws_eip",
+    "aws_db_instance",
+    "aws_elasticache_cluster",
+    "aws_elasticache_replication_group",
+    "aws_cloudwatch_log_group",
+    "aws_cloudwatch_metric_alarm",
+    "aws_sns_topic",
+    "aws_sqs_queue",
+    "aws_lambda_function",
+    "aws_iam_role",
+    "aws_iam_policy",
+    "aws_security_group",
+    "aws_security_group_rule",
+    "aws_vpc",
+    "aws_subnet",
+    "aws_route_table",
+    "aws_lb",
+    "aws_lb_target_group",
+    "aws_lb_listener",
+    "aws_ecs_service",
+    "aws_ecs_task_definition",
+    "aws_ecs_cluster",
     "aws_ecs_cluster_capacity_providers",
 }
-
-import re
 
 
 def detect_provider_version(config_files: dict[str, str] | None = None) -> str | None:
@@ -204,9 +231,20 @@ def detect_provider_version(config_files: dict[str, str] | None = None) -> str |
 
 # Fields that should never appear as HCL attributes (Terraform reserved words)
 _RESERVED_HCL_WORDS = {
-    "resource", "data", "variable", "output", "locals",
-    "module", "provider", "terraform", "moved", "import",
-    "count", "for_each", "depends_on", "lifecycle",
+    "resource",
+    "data",
+    "variable",
+    "output",
+    "locals",
+    "module",
+    "provider",
+    "terraform",
+    "moved",
+    "import",
+    "count",
+    "for_each",
+    "depends_on",
+    "lifecycle",
 }
 
 
@@ -233,7 +271,9 @@ def validate_generated_block(block_type: str, name: str, config: dict) -> list[s
 
     # 1. Block type must be a known cloud resource type
     if not block_type.startswith(("aws_", "google_", "azurerm_")):
-        errors.append(f"Unknown resource type '{block_type}' — not a recognized cloud provider prefix")
+        errors.append(
+            f"Unknown resource type '{block_type}' — not a recognized cloud provider prefix"
+        )
     elif block_type not in _KNOWN_AWS_RESOURCE_TYPES:
         errors.append(
             f"Resource type '{block_type}' has a valid provider prefix but is not in the "
@@ -244,12 +284,16 @@ def validate_generated_block(block_type: str, name: str, config: dict) -> list[s
     if not name or not name[0].isalpha() and name[0] != "_":
         errors.append(f"Resource name '{name}' must start with a letter or underscore")
     if not all(c.isalnum() or c in ("_", "-") for c in name):
-        errors.append(f"Resource name '{name}' contains invalid characters (use only a-z, 0-9, _, -)")
+        errors.append(
+            f"Resource name '{name}' contains invalid characters (use only a-z, 0-9, _, -)"
+        )
 
     # 3. Config keys must not be Terraform reserved words
     for key in config:
         if key in _RESERVED_HCL_WORDS:
-            errors.append(f"Attribute '{key}' is a Terraform reserved word — not valid in a resource block")
+            errors.append(
+                f"Attribute '{key}' is a Terraform reserved word — not valid in a resource block"
+            )
 
     # 4. Check for empty config blocks
     if not config:
@@ -294,11 +338,13 @@ def validate_generated_code(blocks: list[dict]) -> dict:
         config = block.get("config", {})
         errors = validate_generated_block(block_type, name, config)
         if errors:
-            all_errors.append({
-                "resource_type": block_type,
-                "name": name,
-                "errors": errors,
-            })
+            all_errors.append(
+                {
+                    "resource_type": block_type,
+                    "name": name,
+                    "errors": errors,
+                }
+            )
         else:
             valid_count += 1
 

@@ -10,6 +10,15 @@ export function DetailsDrawer({ node, onClose }: Props) {
   const cost = node.metrics.monthly_cost;
   const color = serviceColor(node.service, "#64748b");
 
+  const costDisplay =
+    node.is_module && node.expansion === "unexpanded"
+      ? "Not quantified (module not expanded)"
+      : cost > 0
+        ? `$${cost.toFixed(2)}`
+        : node.metrics.cost_classification === "usage_based"
+          ? "Usage-based"
+          : "Not estimated";
+
   return (
     <div className="absolute right-4 top-14 w-72 rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden z-10">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -34,28 +43,49 @@ export function DetailsDrawer({ node, onClose }: Props) {
       </div>
 
       <div className="p-4 space-y-2.5 text-[11px]">
-        <Row label="Name" value={node.name} />
-        <Row label="Type" value={node.type} />
-        <Row label="Category" value={node.category} />
-        <Row label="Service" value={node.service} />
-        <Row
-          label="Monthly cost"
-          value={
-            cost > 0
-              ? `$${cost.toFixed(2)}`
-              : node.metrics.cost_classification === "usage_based"
-                ? "Usage-based"
-                : "Not estimated"
-          }
-        />
-        {node.metrics.cost_confidence && node.metrics.cost_confidence !== "unknown" && (
-          <Row label="Confidence" value={node.metrics.cost_confidence} />
+        {node.is_module ? (
+          <>
+            <Row label="Terraform address" value={node.resourceAddress} />
+            <Row label="Source" value={node.module_source || "unavailable"} />
+            {node.module_version && <Row label="Version" value={node.module_version} />}
+            <Row label="Source type" value={node.source_type ?? "unknown"} />
+            <Row
+              label="Expansion"
+              value={
+                node.expansion === "unexpanded"
+                  ? "Not expanded"
+                  : node.expansion === "partially_expanded"
+                    ? "Partially expanded"
+                    : "Expanded"
+              }
+            />
+            {typeof node.resource_count === "number" && (
+              <Row label="Resources found" value={String(node.resource_count)} />
+            )}
+            <Row label="Monthly cost" value={costDisplay} />
+            {node.note && (
+              <p className="text-[10px] text-gray-500 italic leading-relaxed pt-1 border-t border-gray-100">
+                {node.note}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <Row label="Name" value={node.name} />
+            <Row label="Type" value={node.type} />
+            <Row label="Category" value={node.category} />
+            <Row label="Service" value={node.service} />
+            <Row label="Monthly cost" value={costDisplay} />
+            {node.metrics.cost_confidence && node.metrics.cost_confidence !== "unknown" && (
+              <Row label="Confidence" value={node.metrics.cost_confidence} />
+            )}
+            {node.resourceAddress && (
+              <Row label="Terraform address" value={node.resourceAddress} />
+            )}
+            {node.region && <Row label="Region" value={node.region} />}
+            <Row label="Layer" value={node.layer} />
+          </>
         )}
-        {node.resourceAddress && (
-          <Row label="Terraform address" value={node.resourceAddress} />
-        )}
-        {node.region && <Row label="Region" value={node.region} />}
-        <Row label="Layer" value={node.layer} />
       </div>
     </div>
   );

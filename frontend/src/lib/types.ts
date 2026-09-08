@@ -1,6 +1,27 @@
 export type Severity = "critical" | "high" | "medium" | "low";
 export type Confidence = "high" | "medium" | "low" | "unknown";
 export type CostClassification = "fixed" | "usage_based" | "estimated" | "unknown";
+export type ModuleExpansion = "expanded" | "partially_expanded" | "unexpanded";
+export type CrimCategory = "NETWORK_SECURITY" | "DATA_SECURITY" | "OBSERVABILITY";
+
+export interface CrimClassification {
+  category: CrimCategory | null;
+  confidence: number;
+  abstained: boolean;
+  reason?: string | null;
+  model?: string;
+}
+
+export interface CrimSummary {
+  name?: string;
+  version?: string;
+  threshold?: number;
+  ml_unavailable?: boolean;
+  classified?: number;
+  abstained?: number;
+  unclassified?: number;
+  resources?: number;
+}
 
 export interface TerraformResource {
   id: string;
@@ -20,6 +41,25 @@ export interface TerraformResource {
   is_data?: boolean;
   billable?: boolean;
   source_file?: string;
+  module_address?: string;
+  ml_classification?: CrimClassification | null;
+}
+
+export interface ModuleInfo {
+  address: string;
+  name: string;
+  source: string;
+  version: string | null;
+  source_type: string;
+  configuration: Record<string, unknown>;
+  source_file: string;
+  source_line: number;
+  expansion: ModuleExpansion;
+  resource_count: number;
+  data_source_count: number;
+  child_modules: string[];
+  references: string[];
+  note: string;
 }
 
 export interface ScoreFindingDetail {
@@ -65,6 +105,10 @@ export interface Scores {
   evidence_dimensions: EvidenceDimension[];
   evidence_coverage_formula: string;
   unassessed_categories?: string[];
+  scope?: "root_configuration_only" | "complete_configuration";
+  scope_label?: string;
+  scope_notes?: string[];
+  modules_unexpanded?: string[];
 }
 
 export interface Explanation {
@@ -96,6 +140,8 @@ export interface Recommendation {
   evidence: string[];
   modes?: string[];
   generated_code?: Record<string, unknown> | null;
+  generated_code_hcl?: string | null;
+  ml_classification?: CrimClassification | null;
 }
 
 export interface CostEstimateDetail {
@@ -117,6 +163,11 @@ export interface CostConfidence {
   reasons: string[];
 }
 
+export interface UnquantifiedModule {
+  address: string;
+  reason: string;
+}
+
 export interface CostSummary {
   current_monthly: number;
   known_monthly: number;
@@ -124,6 +175,7 @@ export interface CostSummary {
   usage_available: boolean;
   confidence: CostConfidence;
   detailed: CostEstimateDetail[];
+  modules_unquantified?: UnquantifiedModule[];
 }
 
 export interface FinopsService {
@@ -206,6 +258,13 @@ export interface GraphNode {
     cost_confidence: Confidence;
   };
   icon: string;
+  is_module?: boolean;
+  expansion?: ModuleExpansion;
+  module_source?: string | null;
+  module_version?: string | null;
+  source_type?: string;
+  note?: string;
+  resource_count?: number;
 }
 
 export interface GraphEdge {
@@ -270,6 +329,8 @@ export interface AnalysisMetadata {
   cost_estimates_confident: Confidence;
   evidence_coverage: Confidence;
   evidence_coverage_pct: number;
+  modules_detected?: number;
+  modules_expanded?: number;
 }
 
 export interface Summary {
@@ -295,10 +356,15 @@ export interface Summary {
   dimensions_total: number;
   evidence_coverage: Confidence;
   evidence_coverage_pct: number;
+  module_count?: number;
+  unexpanded_module_count?: number;
+  scope?: "root_configuration_only" | "complete_configuration";
+  scope_label?: string;
 }
 
 export interface AnalysisResult {
   resources: TerraformResource[];
+  modules?: ModuleInfo[];
   graph: Graph;
   recommendations: Recommendation[];
   scores: Scores;
@@ -310,4 +376,5 @@ export interface AnalysisResult {
   review: Review;
   analysis_metadata: AnalysisMetadata;
   summary: Summary;
+  crim?: CrimSummary | null;
 }

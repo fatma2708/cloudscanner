@@ -29,6 +29,11 @@ NUMBER = "number"
 PUNCT = "punct"
 OP = "op"
 EOF = "eof"
+_MAX_PARSE_ITERATIONS = 100_000
+
+
+class ParseError(ValueError):
+    """Raised in strict mode when malformed HCL cannot be recovered safely."""
 
 
 @dataclass(frozen=True)
@@ -222,9 +227,10 @@ def _tokenize(source: str) -> list[Token]:
 
 
 class _Parser:
-    def __init__(self, tokens: list[Token]) -> None:
+    def __init__(self, tokens: list[Token], *, strict: bool = False) -> None:
         self.tokens = tokens
         self.pos = 0
+        self.strict = strict
 
     def _peek(self, offset: int = 0) -> Token:
         idx = min(self.pos + offset, len(self.tokens) - 1)
@@ -241,6 +247,10 @@ class _Parser:
         if tok.value != value:
             raise ValueError(f"Expected '{value}' but got '{tok.value}' at line {tok.line}")
         return tok
+
+    def _require_progress(self, before: int, context: str) -> None:
+        if self.pos == before:
+            raise ParseError(f"HCL parser made no progress in {context} at token {self.pos}")
 
     def parse(self) -> list[HCLBlock]:
         blocks: list[HCLBlock] = []
@@ -259,20 +269,31 @@ class _Parser:
             labels.append(self._advance().value)
         if self._peek().value != "{":
             # Malformed block; consume until a '{' or EOF to avoid infinite loop.
-            while self._peek().value not in ("{", "}", EOF):
+            iterations = 0
+            while self._peek().kind != EOF and self._peek().value not in ("{", "}"):
+                before = self.pos
                 self._advance()
+                iterations += 1
+                self._require_progress(before, "malformed block recovery")
+                if iterations > _MAX_PARSE_ITERATIONS:
+                    raise ParseError("HCL parser exceeded malformed block recovery limit")
             if self._peek().value == "}":
                 self._advance()
+            if self.strict:
+                raise ParseError(f"Malformed block near line {type_tok.line}")
             return HCLBlock(type=block_type, labels=labels, line=type_tok.line)
 
         self._advance()  # consume '{'
         block = HCLBlock(type=block_type, labels=labels, line=type_tok.line)
         while True:
+            before = self.pos
             tok = self._peek()
             if tok.value == "}":
                 self._advance()
                 break
             if tok.kind == EOF:
+                if self.strict:
+                    raise ParseError(f"Unterminated block at line {tok.line}")
                 break
             if tok.value in (
                 "}",
@@ -297,12 +318,14 @@ class _Parser:
             else:
                 # Something unexpected — skip a token to make progress.
                 self._advance()
+            self._require_progress(before, "block body")
         return block
 
     def _parse_inline_until(self, end_value: str) -> HCLBlock:
         start_line = self._peek().line
         nested = HCLBlock(type="__inline__", labels=[], line=start_line)
         while True:
+            before = self.pos
             tok = self._peek()
             if tok.value == end_value or tok.kind == EOF:
                 break
@@ -315,6 +338,7 @@ class _Parser:
                 )
             else:
                 self._advance()
+            self._require_progress(before, "inline block")
         if self._peek().value == end_value:
             self._advance()
         return nested
@@ -427,16 +451,25 @@ class _Parser:
         return raw, raw
 
 
-def parse_hcl(source: str) -> list[HCLBlock]:
+def parse_hcl(source: str, *, strict: bool = False) -> list[HCLBlock]:
     """Parse an HCL string into a list of top-level blocks.
 
     The parser never raises: malformed input degrades to ``raw`` attributes.
     """
     tokens = _tokenize(source)
-    parser = _Parser(tokens)
+    parser = _Parser(tokens, strict=strict)
     try:
         return parser.parse()
+    except ParseError:
+        if strict:
+            raise
+        return []
     except Exception:
+        if strict:
+            raise ParseError("HCL parse failed") from None
+        import logging
+
+        logging.exception("HCL parse failed")
         return []
 
 

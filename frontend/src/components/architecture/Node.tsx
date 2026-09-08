@@ -8,7 +8,6 @@ interface Props {
   x: number;
   y: number;
   isHovered: boolean;
-  isConnected: boolean;
   isDimmed: boolean;
   isSelected: boolean;
   onMouseEnter: () => void;
@@ -16,27 +15,24 @@ interface Props {
   onClick: () => void;
 }
 
-function kindToIcon(kind: string): FC<SVGProps<SVGSVGElement>> {
-  const map: Record<string, FC<SVGProps<SVGSVGElement>>> = {
-    vpc: VpcIcon,
-    subnet: SubnetIcon,
-    igw: IgwIcon,
-    nat: NatIcon,
-    eip: EipIcon,
-    route_table: RouteIcon,
-    route: RouteIcon,
-    instance: InstanceIcon,
-    rds: DbIcon,
-    security_group: SgIcon,
-    alb: AlbIcon,
-    s3: S3Icon,
-    ecs: EcsIcon,
-    lambda: LambdaIcon,
-    dynamodb: DbIcon,
-    elasticache: DbIcon,
-  };
-  return map[kind] ?? GenericIcon;
-}
+const KIND_ICONS: Record<string, FC<SVGProps<SVGSVGElement>>> = {
+  vpc: VpcIcon,
+  subnet: SubnetIcon,
+  igw: IgwIcon,
+  nat: NatIcon,
+  eip: EipIcon,
+  route_table: RouteIcon,
+  route: RouteIcon,
+  instance: InstanceIcon,
+  rds: DbIcon,
+  security_group: SgIcon,
+  alb: AlbIcon,
+  s3: S3Icon,
+  ecs: EcsIcon,
+  lambda: LambdaIcon,
+  dynamodb: DbIcon,
+  elasticache: DbIcon,
+};
 
 function truncate(label: string, max = 20): string {
   return label.length > max ? label.slice(0, max - 2) + "\u2026" : label;
@@ -47,7 +43,6 @@ export function ArchitectureNode({
   x,
   y,
   isHovered,
-  isConnected,
   isDimmed,
   isSelected,
   onMouseEnter,
@@ -55,8 +50,23 @@ export function ArchitectureNode({
   onClick,
 }: Props) {
   const color = serviceColor(node.service, "#64748b");
-  const Icon = kindToIcon(node.kind);
+  const Icon = KIND_ICONS[node.kind] ?? GenericIcon;
   const opacity = isDimmed ? 0.12 : 1;
+
+  if (node.is_module) {
+    return <ModuleNode
+      node={node}
+      x={x}
+      y={y}
+      color={color}
+      isHovered={isHovered}
+      isDimmed={isDimmed}
+      isSelected={isSelected}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onClick={onClick}
+    />;
+  }
 
   return (
     <g
@@ -72,8 +82,8 @@ export function ArchitectureNode({
           r={NODE_RADIUS + 8}
           fill="none"
           stroke={color}
-          strokeWidth={1.5}
-          strokeOpacity={0.25}
+          strokeWidth={2}
+          strokeOpacity={0.45}
         />
       )}
 
@@ -81,9 +91,9 @@ export function ArchitectureNode({
         cx={x}
         cy={y}
         r={NODE_RADIUS}
-        fill={`${color}14`}
-        stroke={isSelected ? color : `${color}80`}
-        strokeWidth={isHovered || isSelected ? 2 : 1.2}
+        fill={`${color}26`}
+        stroke={isSelected ? color : `${color}b3`}
+        strokeWidth={isHovered || isSelected ? 2.5 : 1.6}
       />
 
       <Icon
@@ -101,11 +111,11 @@ export function ArchitectureNode({
         textAnchor="middle"
         className="select-none"
         style={{
-          fontSize: "9px",
-          fontWeight: 500,
-          fill: "rgba(51,65,85,0.9)",
+          fontSize: "10px",
+          fontWeight: 600,
+          fill: "#1e293b",
           paintOrder: "stroke",
-          stroke: "white",
+          stroke: "rgba(255,255,255,0.95)",
           strokeWidth: 3,
           strokeLinejoin: "round",
         }}
@@ -113,6 +123,123 @@ export function ArchitectureNode({
         {truncate(node.displayName || node.label)}
       </text>
     </g>
+  );
+}
+
+interface ModuleProps extends Props {
+  color: string;
+}
+
+function ModuleNode({
+  node,
+  x,
+  y,
+  color,
+  isHovered,
+  isDimmed,
+  isSelected,
+  onMouseEnter,
+  onMouseLeave,
+  onClick,
+}: ModuleProps) {
+  const opacity = isDimmed ? 0.12 : 1;
+  const unexpanded = node.expansion === "unexpanded";
+  // Unexpanded modules are drawn dashed + hollow: they are declarations whose
+  // contents were never inspected, not concrete resources.
+  const strokeColor = unexpanded ? "#a855f7" : color;
+  const badgeText =
+    node.expansion === "unexpanded"
+      ? "not expanded"
+      : node.expansion === "partially_expanded"
+        ? "partial"
+        : `${node.resource_count ?? 0} res`;
+
+  return (
+    <g
+      style={{ opacity, transition: "opacity 0.15s", cursor: "pointer" }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onClick={onClick}
+    >
+      {isHovered && (
+        <rect
+          x={x - NODE_RADIUS - 8}
+          y={y - NODE_RADIUS - 8}
+          width={(NODE_RADIUS + 8) * 2}
+          height={(NODE_RADIUS + 8) * 2}
+          rx={10}
+          fill="none"
+          stroke="#a855f7"
+          strokeWidth={2}
+          strokeOpacity={0.45}
+        />
+      )}
+
+      <rect
+        x={x - NODE_RADIUS}
+        y={y - NODE_RADIUS}
+        width={NODE_RADIUS * 2}
+        height={NODE_RADIUS * 2}
+        rx={10}
+        fill={unexpanded ? "#faf5ff" : `${color}26`}
+        stroke={isSelected ? strokeColor : `${strokeColor}b3`}
+        strokeWidth={isHovered || isSelected ? 2.5 : 1.6}
+        strokeDasharray={unexpanded ? "4 3" : undefined}
+      />
+
+      <PackageIcon
+        x={x - 8}
+        y={y - 8}
+        width={16}
+        height={16}
+        style={{ color: strokeColor }}
+        className="pointer-events-none"
+      />
+
+      <text
+        x={x}
+        y={y + NODE_RADIUS + 12}
+        textAnchor="middle"
+        className="select-none"
+        style={{
+          fontSize: "10px",
+          fontWeight: 600,
+          fill: "#1e293b",
+          paintOrder: "stroke",
+          stroke: "rgba(255,255,255,0.95)",
+          strokeWidth: 3,
+          strokeLinejoin: "round",
+        }}
+      >
+        {truncate(node.displayName || node.label)}
+      </text>
+      <text
+        x={x}
+        y={y + NODE_RADIUS + 23}
+        textAnchor="middle"
+        className="select-none"
+        style={{
+          fontSize: "8.5px",
+          fontWeight: 700,
+          fill: unexpanded ? "#9333ea" : "#475569",
+          paintOrder: "stroke",
+          stroke: "rgba(255,255,255,0.95)",
+          strokeWidth: 3,
+          strokeLinejoin: "round",
+        }}
+      >
+        {badgeText}
+      </text>
+    </g>
+  );
+}
+
+function PackageIcon(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...p}>
+      <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z" />
+      <path d="M3 8l9 5 9-5M12 13v9" />
+    </svg>
   );
 }
 

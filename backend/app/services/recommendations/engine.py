@@ -9,9 +9,7 @@ from app.services.terraform.parser import TerraformConfig
 SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
-def _resolve_source_locations(
-    config: TerraformConfig, recs: list[Recommendation]
-) -> None:
+def _resolve_source_locations(config: TerraformConfig, recs: list[Recommendation]) -> None:
     """Populate source_file and source_line from target resources.
 
     Rules don't know about source locations; the engine resolves them from
@@ -57,6 +55,9 @@ def run_recommendations(config: TerraformConfig, mode: str = "balanced") -> list
                 collected[rec.key] = rec
         except Exception:
             # A single broken rule must never sink the whole analysis
+            import logging
+
+            logging.exception("Recommendation rule failed")
             continue
 
     recs = list(collected.values())

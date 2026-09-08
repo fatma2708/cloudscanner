@@ -14,11 +14,11 @@ import type { FinopsService, FinopsTrendPoint } from "@/lib/types";
 import { formatCompactCurrency } from "@/lib/format";
 
 const tooltipStyle = {
-  backgroundColor: "hsl(var(--popover))",
-  border: "1px solid hsl(var(--border))",
+  backgroundColor: "var(--popover)",
+  border: "1px solid var(--border)",
   borderRadius: "0.75rem",
   fontSize: "12px",
-  color: "hsl(var(--popover-foreground))",
+  color: "var(--popover-foreground)",
 } as const;
 
 const CATEGORY_COLORS = ["#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#64748b"];

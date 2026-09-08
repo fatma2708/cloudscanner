@@ -1,0 +1,96 @@
+{
+  "dataset": {
+    "path": "C:\\Users\\user\\Downloads\\cloudscanner\\backend\\data\\training_dataset.parquet",
+    "rows": 2607,
+    "sources": [
+      "checkov"
+    ],
+    "mode": "Checkov-only"
+  },
+  "feature_schema_version": "resource-v1",
+  "feature_columns": [
+    "resource_type_hash",
+    "provider_hash",
+    "service_hash",
+    "kind_hash",
+    "attribute_count",
+    "has_encryption_attribute",
+    "has_public_ip_attribute",
+    "has_ingress_attribute",
+    "has_cidr_attribute",
+    "has_backup_attribute",
+    "has_logging_attribute",
+    "encryption_enabled",
+    "public_ip_enabled",
+    "ingress_rule_count",
+    "ingress_open_to_world",
+    "has_reference"
+  ],
+  "categories": {
+    "cost": {
+      "selected_model": "xgboost",
+      "metrics": {
+        "random_forest": {
+          "accuracy": 0.6,
+          "f1": 0.0,
+          "auc": 0.5
+        },
+        "xgboost": {
+          "accuracy": 0.4,
+          "f1": 0.4,
+          "auc": 0.5
+        }
+      },
+      "positive_examples": 10
+    },
+    "other": {
+      "selected_model": "xgboost",
+      "metrics": {
+        "random_forest": {
+          "accuracy": 0.4129032258064516,
+          "f1": 0.44171779141104295,
+          "auc": 0.3486729362591432
+        },
+        "xgboost": {
+          "accuracy": 0.41935483870967744,
+          "f1": 0.4915254237288136,
+          "auc": 0.3774712643678161
+        }
+      },
+      "positive_examples": 659
+    },
+    "reliability": {
+      "selected_model": "xgboost",
+      "metrics": {
+        "random_forest": {
+          "accuracy": 0.13636363636363635,
+          "f1": 0.17391304347826086,
+          "auc": 0.09401709401709406
+        },
+        "xgboost": {
+          "accuracy": 0.3181818181818182,
+          "f1": 0.4444444444444444,
+          "auc": 0.09829059829059833
+        }
+      },
+      "positive_examples": 51
+    },
+    "security": {
+      "selected_model": "xgboost",
+      "metrics": {
+        "random_forest": {
+          "accuracy": 0.36075949367088606,
+          "f1": 0.33112582781456956,
+          "auc": 0.3108183968884077
+        },
+        "xgboost": {
+          "accuracy": 0.40189873417721517,
+          "f1": 0.4148606811145511,
+          "auc": 0.3515177031957977
+        }
+      },
+      "positive_examples": 649
+    }
+  },
+  "generated_at": "2026-09-02T17:53:14.304475+00:00"
+}

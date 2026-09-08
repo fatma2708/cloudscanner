@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useAnalysis } from "@/lib/analysis-context";
 import { ErrorPanel } from "@/components/dashboard/states";
+import { EvidenceCoverageBadge, unexpandedModuleCount } from "@/components/dashboard/evidence-coverage-badge";
 import { MaterialIcon } from "@/components/ui/material-icon";
 import type { ScoreCategory } from "@/lib/types";
 
@@ -70,6 +71,7 @@ export default function ScorePage() {
   if (!data) return null;
 
   const { scores } = data;
+  const unexpandedModules = unexpandedModuleCount(scores, data.summary);
   const evidenceDimensions = scores.evidence_dimensions ?? [];
   const assessed = categories.filter((c) => c.score !== null);
   const unassessed = categories.filter((c) => c.score === null);
@@ -118,6 +120,7 @@ export default function ScorePage() {
           }`}>
             Evidence Coverage: {scores.evidence_coverage_pct.toFixed(0)}%
           </span>
+          <EvidenceCoverageBadge coveragePct={scores.evidence_coverage_pct} unexpandedModules={unexpandedModules} />
           {scores.evidence_coverage === "low" && (
             <span className="text-[10px] text-md-on-surface-variant">
               Score may not reflect true posture — examine more resources

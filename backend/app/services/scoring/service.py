@@ -84,15 +84,20 @@ def _structural_signals(config: TerraformConfig) -> dict[str, list[str]]:
     """Collect structural posture signals that affect score beyond rule findings.
 
     Only checks for actual aws_instance resources, not ECS or other compute.
+
+    Absence-based signals ("no X found") are suppressed when the configuration
+    contains unexpanded modules: the referenced resource types may live inside
+    those modules, so absence cannot be established from the root config alone.
     """
     signals: dict[str, list[str]] = {cat: [] for cat in WEIGHTS}
     resources = [r for r in config.resources if not r.is_data]
     all_resources = config.resources
     kinds = [r.kind for r in resources]
 
+    has_unexpanded = config.has_unexpanded_modules
+
     has_actual_instances = any(
-        r.resource_type == "aws_instance" and not r.is_data
-        for r in all_resources
+        r.resource_type == "aws_instance" and not r.is_data for r in all_resources
     )
     has_asg = "asg" in kinds
     has_alb = "alb" in kinds
@@ -103,20 +108,20 @@ def _structural_signals(config: TerraformConfig) -> dict[str, list[str]]:
     has_sg = "security_group" in kinds
     has_nat = "nat" in kinds
 
-    if has_actual_instances and not has_asg:
+    if has_actual_instances and not has_asg and not has_unexpanded:
         signals["performance"].append("EC2 instances are not managed by an Auto Scaling Group")
         signals["reliability"].append("EC2 instances have no auto-healing (no ASG)")
-    if has_actual_instances and not has_alb and not has_asg:
+    if has_actual_instances and not has_alb and not has_asg and not has_unexpanded:
         signals["maintainability"].append("No load balancer in front of compute")
-    if has_rds and not has_backup:
+    if has_rds and not has_backup and not has_unexpanded:
         signals["reliability"].append("No backup plan found for databases")
-    if has_actual_instances and not has_alarms:
+    if has_actual_instances and not has_alarms and not has_unexpanded:
         signals["observability"].append("No CloudWatch alarms for compute")
-    if not has_iam:
+    if not has_iam and not has_unexpanded:
         signals["compliance"].append("No IAM roles found (least-privilege posture unknown)")
     if has_nat and len([r for r in resources if r.kind == "nat"]) > 1:
         signals["cost"].append("Multiple NAT gateways without HA justification")
-    if not has_sg:
+    if not has_sg and not has_unexpanded:
         signals["security"].append("No explicit security groups found")
 
     return signals
@@ -127,14 +132,19 @@ def _compute_evidence_coverage(
     recommendations: list[Recommendation],
     signals: dict[str, list[str]],
 ) -> tuple[str, float, list[str]]:
-    """Compute evidence coverage: what % of resources have at least one finding
-    or an explicit 'no issue' evidence note.
+    """Compute evidence coverage: what % of the analyzed scope has at least one
+    finding or an explicit 'no issue' evidence note.
+
+    Unexpanded modules count as uninspected scope units: their contents were
+    never examined, so they reduce coverage even though no resource list is
+    known for them.
 
     Returns (level, pct, notes) where level is "high" / "medium" / "low".
     """
     billable = [r for r in config.resources if not r.is_data and r.billable]
+    unexpanded = config.unexpanded_modules()
     total = len(billable)
-    if total == 0:
+    if total == 0 and not unexpanded:
         return "high", 100.0, ["No billable resources to evaluate"]
 
     # Resources that are targets of at least one recommendation
@@ -145,19 +155,27 @@ def _compute_evidence_coverage(
 
     # Resources covered by structural signals (implicit)
     covered_by_signals: set[str] = set()
-    for cat, items in signals.items():
+    for items in signals.values():
         if items:
             # Signals are system-wide, so count all billable resources as covered
             for res in billable:
                 covered_by_signals.add(res.id)
 
     covered = covered_by_findings | covered_by_signals
-    coverage = min(100.0, len(covered) / total * 100)
+    # Denominator includes uninspected module units — each unexpanded module
+    # represents infrastructure CloudPilot could not examine.
+    effective_total = total + len(unexpanded)
+    coverage = min(100.0, len(covered) / max(effective_total, 1) * 100)
 
     notes: list[str] = []
     notes.append(f"{len(covered_by_findings)} resource(s) have explicit findings")
     notes.append(f"{len(covered_by_signals)} resource(s) covered by structural signals")
     notes.append(f"{total} billable resources total")
+    if unexpanded:
+        addresses = ", ".join(m.address for m in unexpanded)
+        notes.append(
+            f"{len(unexpanded)} module(s) not expanded and therefore uninspected: {addresses}"
+        )
 
     if coverage >= 80:
         level = "high"
@@ -192,12 +210,14 @@ def compute_scores(config: TerraformConfig, recommendations: list[Recommendation
         conf_scale = _CONFIDENCE_SCALE.get(rec.confidence, 0.5)
         ded = round(base_ded * conf_scale, 1)
         deductions[cat] += ded
-        findings_by_cat[cat].append({
-            "title": rec.title,
-            "severity": rec.severity,
-            "confidence": rec.confidence,
-            "deduction": ded,
-        })
+        findings_by_cat[cat].append(
+            {
+                "title": rec.title,
+                "severity": rec.severity,
+                "confidence": rec.confidence,
+                "deduction": ded,
+            }
+        )
 
     # Structural signals add a smaller flat deduction
     signals = _structural_signals(config)
@@ -240,23 +260,29 @@ def compute_scores(config: TerraformConfig, recommendations: list[Recommendation
         if not actual_improve:
             actual_improve.append("No issues detected — but limited evidence was examined")
 
-        categories.append({
-            "key": cat,
-            "label": CATEGORY_LABELS[cat],
-            "score": score,
-            "max": 100.0,
-            "weight": round(weight * 100, 1),
-            "deductions": round(deductions[cat], 1),
-            "findings": len(cat_findings),
-            "signals": cat_signals,
-            "evidence_status": "available" if has_evidence else "insufficient_evidence",
-            "explanation": {
-                "findings_detail": cat_findings,
-                "signals_detail": cat_signals,
-                "to_improve": actual_improve if has_evidence else ["Insufficient evidence — no Terraform configuration signals found for this dimension"],
-                "evidence_examined": has_evidence,
-            },
-        })
+        categories.append(
+            {
+                "key": cat,
+                "label": CATEGORY_LABELS[cat],
+                "score": score,
+                "max": 100.0,
+                "weight": round(weight * 100, 1),
+                "deductions": round(deductions[cat], 1),
+                "findings": len(cat_findings),
+                "signals": cat_signals,
+                "evidence_status": "available" if has_evidence else "insufficient_evidence",
+                "explanation": {
+                    "findings_detail": cat_findings,
+                    "signals_detail": cat_signals,
+                    "to_improve": actual_improve
+                    if has_evidence
+                    else [
+                        "Insufficient evidence — no Terraform configuration signals found for this dimension"
+                    ],
+                    "evidence_examined": has_evidence,
+                },
+            }
+        )
         if score is not None:
             overall += score * weight
 
@@ -269,13 +295,33 @@ def compute_scores(config: TerraformConfig, recommendations: list[Recommendation
         grade = "N/A"
     else:
         # Normalize: score is weighted only across dimensions with evidence
-        overall = round(overall / categories_with_evidence_weight, 1) if categories_with_evidence_weight > 0 else None
+        overall = (
+            round(overall / categories_with_evidence_weight, 1)
+            if categories_with_evidence_weight > 0
+            else None
+        )
         if overall is not None:
             grade = grade_for(overall)
             # A+ is only achievable when evidence coverage >= 80%
             if grade == "A+" and coverage_pct < 80:
                 grade = "A"
                 overall = min(overall, 94.9)
+
+    # Scope transparency: when modules were detected but not expanded, the
+    # score describes the ROOT configuration only — never the full
+    # infrastructure. Cap the grade so hidden infrastructure cannot yield a
+    # near-perfect readiness claim.
+    unexpanded = config.unexpanded_modules()
+    scope_notes: list[str] = []
+    if unexpanded:
+        addresses = ", ".join(m.address for m in unexpanded)
+        scope_notes.append(
+            f"{len(unexpanded)} module(s) not expanded ({addresses}); their "
+            "contents were not assessed"
+        )
+        if overall is not None:
+            overall = min(overall, 79.9)
+            grade = grade_for(overall)
 
     return {
         "overall": overall,
@@ -286,6 +332,10 @@ def compute_scores(config: TerraformConfig, recommendations: list[Recommendation
         "coverage_notes": coverage_notes,
         "evidence_dimensions": _evidence_dimensions(config),
         "unassessed_categories": unassessed,
+        "scope": "root_configuration_only" if unexpanded else "complete_configuration",
+        "scope_label": "Root configuration only" if unexpanded else "Full configuration",
+        "scope_notes": scope_notes,
+        "modules_unexpanded": [m.address for m in unexpanded],
     }
 
 
@@ -300,14 +350,62 @@ def _evidence_dimensions(config: TerraformConfig) -> list[dict]:
     non_data = [r for r in config.resources if not r.is_data]
     has_compute = any(r.kind in ("ec2", "ecs", "eks", "lambda", "asg") for r in non_data)
     has_db = any(r.kind in ("rds", "elasticache", "dynamodb") for r in non_data)
-    has_network = any(r.kind in ("alb", "elb", "nat", "vpc") for r in non_data)
+
+    modules = config.modules
+    unexpanded = [m for m in modules if m.expansion != "expanded"]
+    expanded = [m for m in modules if m.expansion == "expanded"]
+
+    if not modules:
+        module_decls = {
+            "name": "Module declarations",
+            "status": "available",
+            "detail": "No module blocks declared — configuration is self-contained",
+        }
+        module_contents = {
+            "name": "Module contents",
+            "status": "available",
+            "detail": "No modules to inspect",
+        }
+    else:
+        module_decls = {
+            "name": "Module declarations",
+            "status": "available",
+            "detail": f"{len(modules)} module declaration(s) detected with source and configuration",
+        }
+        if not unexpanded:
+            module_contents = {
+                "name": "Module contents",
+                "status": "available",
+                "detail": f"All {len(expanded)} local module(s) expanded and inspected",
+            }
+        elif expanded:
+            module_contents = {
+                "name": "Module contents",
+                "status": "partial",
+                "detail": (
+                    f"{len(expanded)} module(s) expanded; "
+                    f"{len(unexpanded)} not inspected: " + ", ".join(m.address for m in unexpanded)
+                ),
+            }
+        else:
+            module_contents = {
+                "name": "Module contents",
+                "status": "unavailable",
+                "detail": (
+                    "Module source was not included in the upload — internals of "
+                    + ", ".join(m.address for m in unexpanded)
+                    + " were not inspected"
+                ),
+            }
 
     return [
         {
-            "name": "Terraform configuration",
+            "name": "Terraform root configuration",
             "status": "available",
-            "detail": f"{len(non_data)} resource declarations analyzed from HCL code",
+            "detail": f"{len(non_data)} resource declaration(s) analyzed from HCL code",
         },
+        module_decls,
+        module_contents,
         {
             "name": "Runtime telemetry",
             "status": "unavailable",
