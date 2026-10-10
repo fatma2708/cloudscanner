@@ -432,18 +432,15 @@ class TerraformConfig:
             if content and path.endswith((".tf", ".tofu")):
                 self._parsed[path] = parse_hcl(content, strict=self.strict)
 
-        assigned = self._plan_scopes()
+        scope_files = self._plan_scopes()
 
         # Derive per-scope file lists and module declarations from assignment.
-        scope_files: dict[str, list[str]] = {}
-        for path in sorted(self._parsed):
-            scope_files.setdefault(assigned.get(path, ""), []).append(path)
-
         module_decls: list[dict] = []
-        for path in sorted(self._parsed):
-            scope = assigned.get(path, "")
-            for block in self._parsed[path]:
-                if block.type == "module" and block.labels:
+        for scope, paths in scope_files.items():
+            for path in paths:
+                for block in self._parsed[path]:
+                    if block.type != "module" or not block.labels:
+                        continue
                     src_attr = block.attr("source")
                     source = src_attr.as_string if src_attr else ""
                     module_decls.append(
@@ -469,32 +466,28 @@ class TerraformConfig:
             for path in paths:
                 self._ingest_file(path, self._parsed[path], module_address=scope)
 
-        self._finalize_modules(module_decls, assigned)
+        self._finalize_modules(module_decls, scope_files)
 
-    def _plan_scopes(self) -> dict[str, str]:
-        """Assign every parsed file to a module scope via BFS over local modules.
+    def _plan_scopes(self) -> dict[str, list[str]]:
+        """Assign parsed files to every reachable local module instance.
 
-        Returns ``{path: scope_address}`` where scope ``""`` is the root module.
-        Local module directories are claimed exactly once (visited-set), which
-        prevents infinite recursion and double-counting of shared modules.
+        A source directory may be expanded under multiple module addresses. An
+        ancestor-directory path prevents genuine recursive module references.
         """
-        assigned: dict[str, str] = {}
-        visited_dirs: set[str] = set()
-        queue: deque[tuple[str, str, int]] = deque([("", "", 0)])
+        scope_files: dict[str, list[str]] = {}
+        queue: deque[tuple[str, str, int, tuple[str, ...]]] = deque(
+            [("", "", 0, ("",))]
+        )
 
         while queue:
-            scope_addr, dir_prefix, depth = queue.popleft()
-            for path in sorted(self._parsed):
-                if path in assigned:
-                    continue
-                if _dir_of(path) != dir_prefix:
-                    continue
-                assigned[path] = scope_addr
+            scope_addr, dir_prefix, depth, ancestors = queue.popleft()
+            if scope_addr in scope_files:
+                continue
+            paths = sorted(path for path in self._parsed if _dir_of(path) == dir_prefix)
+            scope_files[scope_addr] = paths
             if depth >= _MAX_MODULE_DEPTH:
                 continue
-            for path in sorted(self._parsed):
-                if assigned.get(path) != scope_addr:
-                    continue
+            for path in paths:
                 for block in self._parsed[path]:
                     if block.type != "module" or not block.labels:
                         continue
@@ -503,23 +496,20 @@ class TerraformConfig:
                     if classify_module_source(source) != "local":
                         continue
                     target = _join_rel(dir_prefix, source)
-                    if target in visited_dirs:
-                        # Already claimed by another declaration — do not
-                        # re-ingest (prevents cycles and double counting).
+                    if target in ancestors:
                         continue
-                    visited_dirs.add(target)
                     child_scope = (
                         f"{scope_addr}.module.{block.labels[0]}"
                         if scope_addr
                         else f"module.{block.labels[0]}"
                     )
-                    queue.append((child_scope, target, depth + 1))
+                    queue.append((child_scope, target, depth + 1, ancestors + (target,)))
 
-        # Files in directories never claimed by a local module remain root
-        # scope (backward-compatible with flat uploads).
-        for path in self._parsed:
-            assigned.setdefault(path, "")
-        return assigned
+        claimed = {path for paths in scope_files.values() for path in paths}
+        scope_files[""] = sorted(
+            set(scope_files.get("", [])) | {path for path in self._parsed if path not in claimed}
+        )
+        return scope_files
 
     def _raw_values(self, block: HCLBlock) -> list[str]:
         raw_values = [a.raw for a in block.attributes]
@@ -587,7 +577,7 @@ class TerraformConfig:
 
         self._file_module_refs[(module_address, path)] = module_refs
 
-    def _finalize_modules(self, decls: list[dict], assigned: dict[str, str]) -> None:
+    def _finalize_modules(self, decls: list[dict], assigned: dict[str, list[str]]) -> None:
         by_addr: dict[str, Module] = {}
 
         for decl in decls:
@@ -619,7 +609,7 @@ class TerraformConfig:
 
             if decl["source_type"] == "local":
                 target = decl.get("target")
-                scope_files = [p for p, s in assigned.items() if s == address]
+                scope_files = assigned.get(address, [])
                 if target is not None and target not in {_dir_of(p) for p in self._parsed}:
                     module.note = (
                         "Local module path not found in the uploaded project; contents unavailable."

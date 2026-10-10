@@ -70,6 +70,23 @@ resource "aws_security_group" "main" { vpc_id = var.vpc_id }
 """,
 }
 
+SHARED_LOCAL_FILES = {
+        "main.tf": """
+module "app_a" {
+    source = "./modules/app"
+}
+
+module "app_b" {
+    source = "./modules/app"
+}
+""",
+        "modules/app/main.tf": """
+resource "aws_instance" "server" {
+    instance_type = "t3.micro"
+}
+""",
+}
+
 
 def test_module_blocks_are_parsed_with_source_version_and_location():
     cfg = parse_terraform_files(files=BENCHMARK_FILES)
@@ -132,6 +149,21 @@ def test_local_modules_are_expanded_recursively_with_canonical_addresses():
     # No double counting: each resource appears exactly once.
     ids = [r.id for r in cfg.resources]
     assert len(ids) == len(set(ids))
+
+
+def test_shared_local_module_source_expands_per_module_instance():
+    cfg = parse_terraform_files(files=SHARED_LOCAL_FILES)
+    addresses = sorted(resource.address for resource in cfg.resources)
+
+    assert addresses == [
+        "module.app_a.aws_instance.server",
+        "module.app_b.aws_instance.server",
+    ]
+    by_addr = {module.address: module for module in cfg.modules}
+    assert by_addr["module.app_a"].expansion == "expanded"
+    assert by_addr["module.app_b"].expansion == "expanded"
+    assert by_addr["module.app_a"].resource_count == 1
+    assert by_addr["module.app_b"].resource_count == 1
 
 
 def test_cyclic_local_modules_do_not_recurse_forever_or_double_count():
